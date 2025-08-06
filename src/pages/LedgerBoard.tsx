@@ -1,0 +1,618 @@
+import React, { useState, useEffect, useCallback } from 'react'
+import { useAuth } from '@/contexts/AuthContext'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Progress } from '@/components/ui/progress'
+import { Shield, Search, Filter, Download, ArrowUpDown, Calendar, Package, Building, User, Trophy, Target, TrendingUp, Award, Clock, CheckCircle, XCircle } from 'lucide-react'
+import { supabase } from '@/integrations/supabase/client'
+import { useToast } from '@/hooks/use-toast'
+import { format } from 'date-fns'
+
+interface StockMovement {
+  id: string
+  movement_date: string
+  movement_type: string
+  from_branch: string | null
+  to_branch: string | null
+  quantity_moved: number
+  moved_by: string | null
+  notes: string | null
+  for_dispenser?: string | null
+  product_name: string | null
+}
+
+interface DispenserPerformance {
+  dispenser_id: string
+  dispenser_name: string
+  branch_name: string
+  total_tasks: number
+  completed_tasks: number
+  pending_tasks: number
+  total_adjustments: number
+  total_quantity_adjusted: number
+  completion_rate: number
+  efficiency_score: number
+  last_activity: string
+  streak_days: number
+  rank: number
+}
+
+const LedgerBoard = () => {
+  const { user } = useAuth()
+  const [movements, setMovements] = useState<StockMovement[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [filterType, setFilterType] = useState<string>('all')
+  const [filterBranch, setFilterBranch] = useState<string>('all')
+  const { toast } = useToast()
+
+  // Performance tracking states
+  const [dispenserPerformance, setDispenserPerformance] = useState<DispenserPerformance[]>([])
+  const [performanceLoading, setPerformanceLoading] = useState(true)
+  const [selectedPeriod, setSelectedPeriod] = useState('week') // week, month, quarter
+
+  const loadMovements = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('stock_movement_history_view')
+        .select('*')
+        .order('movement_date', { ascending: false })
+      if (error) throw error
+      setMovements(data || [])
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error('Error loading movements:', message)
+      toast({
+        title: "Error",
+        description: "Failed to load stock movements",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [toast])
+
+  const loadDispenserPerformance = useCallback(async () => {
+    setPerformanceLoading(true)
+    try {
+      // Get date range based on selected period
+      const now = new Date()
+      let startDate = new Date()
+      switch (selectedPeriod) {
+        case 'week':
+          startDate.setDate(now.getDate() - 7)
+          break
+        case 'month':
+          startDate.setMonth(now.getMonth() - 1)
+          break
+        case 'quarter':
+          startDate.setMonth(now.getMonth() - 3)
+          break
+        default:
+          startDate.setDate(now.getDate() - 7)
+      }
+
+      // Get all dispensers
+      const { data: dispensers, error: dispensersError } = await supabase
+        .from('users_with_roles')
+        .select('user_id, name, branch_name')
+        .eq('role', 'dispenser')
+
+      if (dispensersError) throw dispensersError
+
+      const performanceData: DispenserPerformance[] = []
+
+      for (const dispenser of dispensers || []) {
+        // Get tasks for this dispenser
+        const { data: tasks, error: tasksError } = await supabase
+          .from('weekly_tasks')
+          .select('*')
+          .eq('assigned_to', dispenser.user_id)
+          .gte('created_at', startDate.toISOString())
+
+        if (tasksError) throw tasksError
+
+        // Get adjustments made by this dispenser
+        const { data: adjustments, error: adjustmentsError } = await supabase
+          .from('stock_movement_history')
+          .select('*')
+          .eq('moved_by', dispenser.user_id)
+          .eq('movement_type', 'adjustment')
+          .gte('movement_date', startDate.toISOString())
+
+        if (adjustmentsError) throw adjustmentsError
+
+        const totalTasks = tasks?.length || 0
+        const completedTasks = tasks?.filter(t => t.status === 'completed').length || 0
+        const pendingTasks = tasks?.filter(t => t.status === 'pending').length || 0
+        const totalAdjustments = adjustments?.length || 0
+        const totalQuantityAdjusted = adjustments?.reduce((sum, adj) => sum + adj.quantity_moved, 0) || 0
+        const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0
+        // Enhanced scoring that values small quantities and adjustments equally
+        const taskScore = completionRate * 0.3 // Reduced weight for tasks
+        const adjustmentScore = totalAdjustments * 4 // Increased weight for number of adjustments
+        const quantityScore = totalQuantityAdjusted * 1.5 // Increased weight for total quantity moved
+        
+        // Bonus for small quantity adjustments (encourages frequent small movements)
+        const smallAdjustments = adjustments?.filter(adj => adj.quantity_moved <= 5).length || 0
+        const smallAdjustmentBonus = smallAdjustments * 2 // Bonus for small adjustments
+        
+        // Bonus for activity frequency (more adjustments = better)
+        const activityBonus = totalAdjustments >= 10 ? 20 : totalAdjustments >= 5 ? 10 : 0
+        
+        const efficiencyScore = Math.round(taskScore + adjustmentScore + quantityScore + smallAdjustmentBonus + activityBonus)
+
+        // Calculate streak (consecutive days with activity)
+        const activityDates = new Set()
+        if (tasks) {
+          tasks.forEach(task => {
+            if (task.status === 'completed') {
+              activityDates.add(new Date(task.updated_at).toDateString())
+            }
+          })
+        }
+        if (adjustments) {
+          adjustments.forEach(adj => {
+            activityDates.add(new Date(adj.movement_date).toDateString())
+          })
+        }
+
+        const sortedDates = Array.from(activityDates).sort().reverse()
+        let streakDays = 0
+        let currentDate = new Date()
+        for (let i = 0; i < sortedDates.length; i++) {
+          const activityDate = new Date(sortedDates[i] as string)
+          const diffDays = Math.floor((currentDate.getTime() - activityDate.getTime()) / (1000 * 60 * 60 * 24))
+          if (diffDays === i) {
+            streakDays++
+          } else {
+            break
+          }
+        }
+
+        // Get last activity
+        const allActivities = [
+          ...(tasks?.map(t => ({ date: t.updated_at, type: 'task' })) || []),
+          ...(adjustments?.map(a => ({ date: a.movement_date, type: 'adjustment' })) || [])
+        ]
+        const lastActivity = allActivities.length > 0 
+          ? allActivities.sort((a, b) => new Date(b.date as string).getTime() - new Date(a.date as string).getTime())[0].date
+          : 'No activity'
+
+        performanceData.push({
+          dispenser_id: dispenser.user_id,
+          dispenser_name: dispenser.name,
+          branch_name: dispenser.branch_name || 'Unknown',
+          total_tasks: totalTasks,
+          completed_tasks: completedTasks,
+          pending_tasks: pendingTasks,
+          total_adjustments: totalAdjustments,
+          total_quantity_adjusted: totalQuantityAdjusted,
+          completion_rate: completionRate,
+          efficiency_score: efficiencyScore,
+          last_activity: lastActivity,
+          streak_days: streakDays,
+          rank: 0 // Will be set after sorting
+        })
+      }
+
+      // Sort by efficiency score and assign ranks
+      performanceData.sort((a, b) => b.efficiency_score - a.efficiency_score)
+      performanceData.forEach((perf, index) => {
+        perf.rank = index + 1
+      })
+
+      setDispenserPerformance(performanceData)
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.error('Error loading performance data:', message)
+      toast({
+        title: "Error",
+        description: "Failed to load dispenser performance data",
+        variant: "destructive",
+      })
+    } finally {
+      setPerformanceLoading(false)
+    }
+  }, [selectedPeriod, toast])
+
+  useEffect(() => {
+    if (user) {
+      loadMovements()
+      loadDispenserPerformance()
+    }
+  }, [user, loadMovements, loadDispenserPerformance])
+
+  const filteredMovements = movements.filter(movement => {
+    const searchLower = searchTerm.toLowerCase();
+    const matchesSearch = searchTerm === '' || 
+      (movement.product_name && movement.product_name.toLowerCase().includes(searchLower)) ||
+      (movement.moved_by && movement.moved_by.toLowerCase().includes(searchLower)) ||
+      (movement.notes && movement.notes.toLowerCase().includes(searchLower));
+    
+    const matchesType = filterType === 'all' || movement.movement_type === filterType
+    const matchesBranch = filterBranch === 'all' || 
+      movement.from_branch === filterBranch || 
+      movement.to_branch === filterBranch
+
+    return matchesSearch && matchesType && matchesBranch
+  })
+
+  const getMovementTypeColor = (type: string) => {
+    switch (type) {
+      case 'sale': return 'bg-green-100 text-green-800'
+      case 'transfer': return 'bg-blue-100 text-blue-800'
+      case 'adjustment': return 'bg-yellow-100 text-yellow-800'
+      case 'expiry': return 'bg-red-100 text-red-800'
+      default: return 'bg-gray-100 text-gray-800'
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-2 text-muted-foreground">Loading ledger data...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-2 text-muted-foreground">Please log in to access the ledger.</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <div className="border-b bg-card px-6 py-4">
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-bold">Ledger Board</h1>
+            <p className="text-muted-foreground">Track all stock movements and dispenser performance</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 text-muted-foreground text-sm">
+              <Package className="h-4 w-4" />
+              <span>{filteredMovements.length} Movements</span>
+            </div>
+            <Button variant="outline" className="flex items-center gap-2">
+              <Download className="h-4 w-4" />
+              Export
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-6">
+        <Tabs defaultValue="ledger" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="ledger" className="flex items-center gap-2">
+              <ArrowUpDown className="h-4 w-4" />
+              Stock Movements
+            </TabsTrigger>
+            <TabsTrigger value="performance" className="flex items-center gap-2">
+              <Trophy className="h-4 w-4" />
+              Dispenser Performance
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="ledger" className="space-y-6">
+            {/* Filters */}
+            <Card className="mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Filter className="h-5 w-5" />
+                  Filters
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap gap-4">
+                  <div className="flex-1 min-w-[200px]">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search movements..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                  <Select value={filterType} onValueChange={setFilterType}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Movement Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Types</SelectItem>
+                      <SelectItem value="sale">Sales</SelectItem>
+                      <SelectItem value="transfer">Transfers</SelectItem>
+                      <SelectItem value="adjustment">Adjustments</SelectItem>
+                      <SelectItem value="expiry">Expiries</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={filterBranch} onValueChange={setFilterBranch}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Branches</SelectItem>
+                      <SelectItem value="main">Main Branch</SelectItem>
+                      <SelectItem value="branch1">Branch 1</SelectItem>
+                      <SelectItem value="branch2">Branch 2</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Movements Table */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ArrowUpDown className="h-5 w-5" />
+                  Stock Movements
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>From</TableHead>
+                      <TableHead>To</TableHead>
+                      <TableHead>Quantity</TableHead>
+                      <TableHead>Moved By</TableHead>
+                      <TableHead>Notes</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredMovements.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                          No movements found.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredMovements.map((movement) => (
+                        <TableRow key={movement.id}>
+                          <TableCell className="font-medium">
+                            <div className="flex items-center gap-2">
+                              <Calendar className="h-4 w-4 text-muted-foreground" />
+                              {format(new Date(movement.movement_date), 'MMM dd, yyyy')}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Package className="h-4 w-4 text-muted-foreground" />
+                              {movement.product_name || 'Unknown Product'}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge className={getMovementTypeColor(movement.movement_type)}>
+                              {movement.movement_type.charAt(0).toUpperCase() + movement.movement_type.slice(1)}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Building className="h-4 w-4 text-muted-foreground" />
+                              {movement.from_branch || 'Unknown Branch'}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Building className="h-4 w-4 text-muted-foreground" />
+                              {movement.to_branch || 'Unknown Branch'}
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            {movement.quantity_moved}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-muted-foreground" />
+                              {movement.moved_by || 'Unknown Mover'}
+                            </div>
+                          </TableCell>
+                          <TableCell className="max-w-[200px] truncate">
+                            {movement.notes || '-'}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="performance" className="space-y-6">
+            {/* Performance Header */}
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-semibold">Dispenser Performance Leaderboard</h2>
+                <p className="text-muted-foreground">Track and incentivize dispenser productivity</p>
+              </div>
+              <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
+                <SelectTrigger className="w-[150px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="week">This Week</SelectItem>
+                  <SelectItem value="month">This Month</SelectItem>
+                  <SelectItem value="quarter">This Quarter</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {performanceLoading ? (
+              <Card>
+                <CardContent className="py-8 text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+                  <p className="mt-2 text-muted-foreground">Loading performance data...</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                {/* Top Performers */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {dispenserPerformance.slice(0, 3).map((perf, index) => (
+                    <Card key={perf.dispenser_id} className="relative overflow-hidden">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            {index === 0 && <Trophy className="h-5 w-5 text-yellow-500" />}
+                            {index === 1 && <Award className="h-5 w-5 text-gray-400" />}
+                            {index === 2 && <Award className="h-5 w-5 text-orange-500" />}
+                            <Badge variant="outline">#{perf.rank}</Badge>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-2xl font-bold text-primary">{perf.efficiency_score}</div>
+                            <div className="text-xs text-muted-foreground">Efficiency Score</div>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-2">
+                          <div className="font-semibold">{perf.dispenser_name}</div>
+                          <div className="text-sm text-muted-foreground">{perf.branch_name}</div>
+                          <div className="flex items-center gap-2 text-sm">
+                            <CheckCircle className="h-4 w-4 text-green-500" />
+                            <span>{perf.completed_tasks} completed</span>
+                          </div>
+                                                     <div className="flex items-center gap-2 text-sm">
+                             <Target className="h-4 w-4 text-blue-500" />
+                             <span>{perf.total_adjustments} adjustments ({perf.total_quantity_adjusted} units)</span>
+                           </div>
+                          <div className="flex items-center gap-2 text-sm">
+                            <TrendingUp className="h-4 w-4 text-purple-500" />
+                            <span>{perf.streak_days} day streak</span>
+                          </div>
+                          <Progress value={perf.completion_rate} className="h-2" />
+                          <div className="text-xs text-muted-foreground">
+                            {perf.completion_rate.toFixed(1)}% completion rate
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Full Performance Table */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Trophy className="h-5 w-5" />
+                      Complete Performance Rankings
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Rank</TableHead>
+                          <TableHead>Dispenser</TableHead>
+                          <TableHead>Branch</TableHead>
+                                                     <TableHead>Tasks</TableHead>
+                           <TableHead>Adjustments</TableHead>
+                           <TableHead>Quantity Moved</TableHead>
+                           <TableHead>Completion Rate</TableHead>
+                          <TableHead>Efficiency Score</TableHead>
+                          <TableHead>Streak</TableHead>
+                          <TableHead>Last Activity</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {dispenserPerformance.map((perf) => (
+                          <TableRow key={perf.dispenser_id}>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {perf.rank <= 3 && (
+                                  <Trophy className={`h-4 w-4 ${
+                                    perf.rank === 1 ? 'text-yellow-500' : 
+                                    perf.rank === 2 ? 'text-gray-400' : 'text-orange-500'
+                                  }`} />
+                                )}
+                                <Badge variant={perf.rank <= 3 ? 'default' : 'secondary'}>
+                                  #{perf.rank}
+                                </Badge>
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-medium">{perf.dispenser_name}</TableCell>
+                            <TableCell>{perf.branch_name}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className="h-4 w-4 text-green-500" />
+                                <span>{perf.completed_tasks}/{perf.total_tasks}</span>
+                              </div>
+                            </TableCell>
+                                                         <TableCell>
+                               <div className="flex items-center gap-2">
+                                 <Target className="h-4 w-4 text-blue-500" />
+                                 <span>{perf.total_adjustments} adjustments</span>
+                               </div>
+                             </TableCell>
+                             <TableCell>
+                               <div className="flex items-center gap-2">
+                                 <Package className="h-4 w-4 text-green-500" />
+                                 <span className="font-medium">{perf.total_quantity_adjusted} units</span>
+                               </div>
+                             </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Progress value={perf.completion_rate} className="w-16 h-2" />
+                                <span className="text-sm">{perf.completion_rate.toFixed(1)}%</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="font-semibold text-primary">{perf.efficiency_score}</div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <TrendingUp className="h-4 w-4 text-purple-500" />
+                                <span>{perf.streak_days} days</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Clock className="h-4 w-4 text-muted-foreground" />
+                                <span className="text-sm">
+                                  {perf.last_activity === 'No activity' 
+                                    ? 'No activity' 
+                                    : format(new Date(perf.last_activity as string), 'MMM dd')
+                                  }
+                                </span>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </TabsContent>
+        </Tabs>
+      </div>
+    </div>
+  )
+}
+
+export default LedgerBoard

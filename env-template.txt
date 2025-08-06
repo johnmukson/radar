@@ -1,0 +1,17 @@
+# Supabase Configuration
+# Copy this content to a new file named .env in your project root
+# Replace the placeholder values with your new Supabase project credentials
+
+VITE_SUPABASE_URL=your_new_supabase_project_url_here
+VITE_SUPABASE_ANON_KEY=your_new_supabase_anon_key_here
+
+# Example format:
+# VITE_SUPABASE_URL=https://your-project-id.supabase.co
+# VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+
+# Instructions:
+# 1. Go to your Supabase project dashboard
+# 2. Click Settings → API
+# 3. Copy the "Project URL" and "anon public" key
+# 4. Replace the placeholder values above
+# 5. Save as .env in your project root 

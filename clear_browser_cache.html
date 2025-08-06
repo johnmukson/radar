@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Browser Cache</title>
+</head>
+<body>
+    <h1>Clear Browser Cache</h1>
+    <button onclick="clearAll()">Clear All Storage</button>
+    
+    <script>
+        function clearAll() {
+            // Clear localStorage
+            localStorage.clear();
+            
+            // Clear sessionStorage
+            sessionStorage.clear();
+            
+            // Clear IndexedDB (if any)
+            if ('indexedDB' in window) {
+                indexedDB.databases().then(databases => {
+                    databases.forEach(db => {
+                        indexedDB.deleteDatabase(db.name);
+                    });
+                });
+            }
+            
+            alert('All browser storage cleared! Refresh your app now.');
+        }
+        
+        // Auto-clear on page load
+        clearAll();
+    </script>
+</body>
+</html>

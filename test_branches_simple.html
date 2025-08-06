@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Branches Access</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        pre { background: #f5f5f5; padding: 10px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Testing Branches Access</h1>
+    <div id="result"></div>
+    
+    <script>
+        // Supabase configuration
+        const supabaseUrl = 'https://pvtrcbemeesaebrwhenw.supabase.co'
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB2dHJjYmVtZWVzYWVicndoZW53Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0Mzg4NDYsImV4cCI6MjA3MDAxNDg0Nn0.YourActualKeyHere'
+        
+        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey)
+        
+        async function testBranches() {
+            const resultDiv = document.getElementById('result')
+            resultDiv.innerHTML = '<p class="info">Testing branch access...</p>'
+            
+            try {
+                console.log('🔍 Testing branches access...')
+                
+                const { data, error } = await supabase
+                    .from('branches')
+                    .select('id, name, code')
+                    .order('name')
+                
+                console.log('🔍 Supabase response:', { data, error })
+                
+                if (error) {
+                    resultDiv.innerHTML = `
+                        <p class="error">❌ Error: ${error.message}</p>
+                        <p class="error">Code: ${error.code}</p>
+                        <p class="error">Details: ${error.details}</p>
+                    `
+                    console.error('Error:', error)
+                } else {
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ Success! Found ${data.length} branches:</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                        <p class="info">Munyonyo branch: ${data.find(b => b.name.toLowerCase().includes('munyonyo')) ? '✅ Found' : '❌ Not found'}</p>
+                    `
+                    console.log('Branches:', data)
+                }
+            } catch (err) {
+                resultDiv.innerHTML = `
+                    <p class="error">❌ Exception: ${err.message}</p>
+                    <pre>${err.stack}</pre>
+                `
+                console.error('Exception:', err)
+            }
+        }
+        
+        testBranches()
+    </script>
+</body>
+</html> 

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Branches Fetch</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <h1>Testing Branch Fetch</h1>
+    <div id="result"></div>
+    
+    <script>
+        // Replace with your actual Supabase URL and anon key
+        const supabaseUrl = 'https://pvtrcbemeesaebrwhenw.supabase.co'
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB2dHJjYmVtZWVzYWVicndoZW53Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0Mzg4NDYsImV4cCI6MjA3MDAxNDg0Nn0.YourActualKeyHere'
+        
+        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey)
+        
+        async function testBranches() {
+            const resultDiv = document.getElementById('result')
+            resultDiv.innerHTML = '<p>Testing branch fetch...</p>'
+            
+            try {
+                const { data, error } = await supabase
+                    .from('branches')
+                    .select('id, name, code')
+                    .order('name')
+                
+                if (error) {
+                    resultDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`
+                    console.error('Error:', error)
+                } else {
+                    resultDiv.innerHTML = `
+                        <p style="color: green;">Success! Found ${data.length} branches:</p>
+                        <ul>
+                            ${data.map(b => `<li>${b.name} (${b.code}) - ID: ${b.id}</li>`).join('')}
+                        </ul>
+                    `
+                    console.log('Branches:', data)
+                }
+            } catch (err) {
+                resultDiv.innerHTML = `<p style="color: red;">Exception: ${err.message}</p>`
+                console.error('Exception:', err)
+            }
+        }
+        
+        testBranches()
+    </script>
+</body>
+</html> 

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Database Permissions Test</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <h1>Database Permissions Test</h1>
+    <button onclick="testPermissions()">Test Permissions</button>
+    <div id="results"></div>
+
+    <script>
+        const supabaseUrl = 'https://pvtrcbemeesaebrwhenw.supabase.co'
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB2dHJjYmVtZWVzYWVicndoZW53Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ0NDA0NzAsImV4cCI6MjA3MDAxNjQ3MH0.Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8Ej8'
+        
+        const supabase = window.supabase.createClient(supabaseUrl, supabaseKey)
+
+        async function testPermissions() {
+            const results = document.getElementById('results')
+            results.innerHTML = '<h2>Testing Permissions...</h2>'
+
+            try {
+                // Test SELECT
+                console.log('Testing SELECT...')
+                const { data: selectData, error: selectError } = await supabase
+                    .from('stock_items')
+                    .select('*')
+                    .limit(1)
+                
+                if (selectError) {
+                    results.innerHTML += `<p style="color: red;">SELECT Error: ${selectError.message}</p>`
+                } else {
+                    results.innerHTML += `<p style="color: green;">SELECT: ✅ Working</p>`
+                }
+
+                // Test INSERT
+                console.log('Testing INSERT...')
+                const testItem = {
+                    product_name: 'TEST ITEM',
+                    branch_id: '7adbf22b-21c2-414c-b4d1-a99fff19c0ff', // Munyonyo branch
+                    expiry_date: '2026-12-31',
+                    quantity: 1,
+                    unit_price: 100
+                }
+
+                const { data: insertData, error: insertError } = await supabase
+                    .from('stock_items')
+                    .insert(testItem)
+                    .select()
+
+                if (insertError) {
+                    results.innerHTML += `<p style="color: red;">INSERT Error: ${insertError.message}</p>`
+                    console.error('INSERT Error:', insertError)
+                } else {
+                    results.innerHTML += `<p style="color: green;">INSERT: ✅ Working</p>`
+                    
+                    // Clean up test item
+                    if (insertData && insertData[0]) {
+                        await supabase
+                            .from('stock_items')
+                            .delete()
+                            .eq('id', insertData[0].id)
+                    }
+                }
+
+                // Test branches table
+                console.log('Testing branches...')
+                const { data: branchesData, error: branchesError } = await supabase
+                    .from('branches')
+                    .select('*')
+                    .limit(5)
+
+                if (branchesError) {
+                    results.innerHTML += `<p style="color: red;">Branches Error: ${branchesError.message}</p>`
+                } else {
+                    results.innerHTML += `<p style="color: green;">Branches: ✅ Working (${branchesData.length} branches found)</p>`
+                }
+
+            } catch (error) {
+                results.innerHTML += `<p style="color: red;">General Error: ${error.message}</p>`
+                console.error('Test Error:', error)
+            }
+        }
+    </script>
+</body>
+</html> 

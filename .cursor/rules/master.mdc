@@ -1,0 +1,8 @@
+---
+description: useful for tasks that affect the frontend and backend.
+alwaysApply: false
+---
+Before making any code change, scan the entire repository/frontend and the backend.md schema dump.
+If you add debugging statements while working, be sure to remove them before committing/pushing.
+
+When you introduce new SQL scripts, make sure to reflect those changes in backend.md for traceability.
