@@ -98,9 +98,9 @@ export default function AuthPage() {
               <button
                 type="button"
                 className="text-blue-400 hover:underline text-sm"
-                onClick={() => { setShowReset(true); setError(''); setResetMessage(''); }}
+                onClick={() => { window.location.href = 'https://radar-wheat.vercel.app/'; }}
               >
-                Forgot password?
+                Login
               </button>
             </div>
           </form>
