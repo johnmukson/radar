@@ -4,32 +4,37 @@ import { supabase } from '@/integrations/supabase/client'
 
 export function useUserRole() {
   const { user } = useAuth()
-  const [roles, setRoles] = useState<string[]>(['admin']) // Default to admin for testing
+  const [roles, setRoles] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const fetchRoles = async () => {
       setLoading(true)
       
-      // TEMPORARY FIX: Always use the fixed admin user ID for testing
-      const testUserId = '74b2946d-6483-47e7-b03d-aa47cf3def5e'
+      if (!user) {
+        setRoles([])
+        setLoading(false)
+        return
+      }
       
       try {
         const { data, error } = await supabase
           .from('user_roles')
           .select('role')
-          .eq('user_id', testUserId)
+          .eq('user_id', user.id)
         
         if (data && data.length > 0) {
           setRoles(data.map(r => r.role))
-          console.log('Fetched roles:', data.map(r => r.role))
+          console.log('Fetched roles for user:', user.id, 'Roles:', data.map(r => r.role))
         } else {
-          // If no roles found, keep admin default
-          console.log('Fetched roles: [admin] (default for testing)')
+          // If no roles found, default to dispenser for safety
+          setRoles(['dispenser'])
+          console.log('No roles found for user:', user.id, 'Defaulting to dispenser')
         }
       } catch (err) {
-        // Keep admin default if anything fails
-        console.log('Fetched roles: [admin] (fallback for testing)')
+        console.error('Error fetching roles:', err)
+        // Default to dispenser for safety
+        setRoles(['dispenser'])
       }
       
       setLoading(false)
