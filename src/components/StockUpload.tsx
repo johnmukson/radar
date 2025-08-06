@@ -557,16 +557,41 @@ const StockUpload = () => {
         deletedCount = allItems?.length || 0
       }
 
-      if (deletedCount > 0) {
+      // Delete all weekly tasks
+      console.log('🗑️ Attempting to delete all weekly tasks...')
+      const { data: weeklyTasks, error: weeklyTasksError } = await supabase
+        .from('weekly_tasks')
+        .select('*')
+
+      if (weeklyTasksError) {
+        console.error('❌ Weekly tasks fetch error:', weeklyTasksError)
+        throw new Error(`Failed to fetch weekly tasks: ${weeklyTasksError.message}`)
+      }
+
+      const { error: weeklyTasksDeleteError } = await supabase
+        .from('weekly_tasks')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000') // Delete all weekly tasks
+
+      if (weeklyTasksDeleteError) {
+        console.error('❌ Weekly tasks delete error:', weeklyTasksDeleteError)
+        throw new Error(`Failed to delete weekly tasks: ${weeklyTasksDeleteError.message}`)
+      } else {
+        console.log('✅ Weekly tasks deleted successfully!')
+      }
+
+      const weeklyTasksCount = weeklyTasks?.length || 0
+
+      if (deletedCount > 0 || weeklyTasksCount > 0) {
         toast({
           title: "Bulk Delete Complete",
-          description: `Successfully deleted ALL ${deletedCount} stock items from the database.`,
+          description: `Successfully deleted ALL ${deletedCount} stock items and ${weeklyTasksCount} weekly tasks from the database.`,
         })
         setTotalStockItems(0) // Update the count
       } else {
         toast({
           title: "No Items Found",
-          description: "No stock items were found to delete.",
+          description: "No stock items or weekly tasks were found to delete.",
         })
       }
     } catch (error: unknown) {
@@ -606,11 +631,11 @@ const StockUpload = () => {
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle className="text-red-600">⚠️ Delete ALL Stock Items</AlertDialogTitle>
+                  <AlertDialogTitle className="text-red-600">⚠️ Delete ALL Stock Items & Weekly Tasks</AlertDialogTitle>
                   <AlertDialogDescription>
-                    <span className="text-red-600 font-medium">⚠️ WARNING: This will permanently delete ALL {totalStockItems} stock items from the database.</span>
+                    <span className="text-red-600 font-medium">⚠️ WARNING: This will permanently delete ALL {totalStockItems} stock items AND ALL weekly tasks from the database.</span>
                     <br /><br />
-                    This action cannot be undone and will permanently remove ALL stock items from the system.
+                    This action cannot be undone and will permanently remove ALL stock items and weekly tasks from the system.
                     <br /><br />
                     <strong>Are you absolutely sure you want to continue?</strong>
                   </AlertDialogDescription>
