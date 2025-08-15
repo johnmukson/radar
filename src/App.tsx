@@ -8,6 +8,7 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
+import AuthConfirm from "./pages/AuthConfirm";
 import CreateUser from "./pages/CreateUser";
 import Dashboard from "./pages/Dashboard";
 import LedgerBoard from "./pages/LedgerBoard";
@@ -39,6 +40,7 @@ const App = () => (
                 <Routes>
                   <Route path="/" element={<Index />} />
                   <Route path="/auth" element={<Auth />} />
+                  <Route path="/auth/confirm" element={<AuthConfirm />} />
                   <Route path="/update-password" element={<UpdatePassword />} />
                   <Route path="/create-user" element={<CreateUser />} />
                   

@@ -1,13 +1,14 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { User, Session } from '@supabase/supabase-js'
-import { supabase } from '@/integrations/supabase/client'
+import { supabase, getAuthRedirectUrl } from '@/integrations/supabase/client'
 
 interface AuthContextType {
   user: User | null
   session: Session | null
-  signUp: (email: string, password: string) => Promise<{ error: unknown }>
-  signIn: (email: string, password: string) => Promise<{ error: unknown }>
+  signUp: (email: string, password: string) => Promise<{ error: any }>
+  signIn: (email: string, password: string) => Promise<{ error: any }>
   signOut: () => Promise<void>
+  resendConfirmationEmail: (email: string) => Promise<{ error: any }>
   loading: boolean
 }
 
@@ -45,7 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [])
 
   const signUp = async (email: string, password: string) => {
-    const redirectUrl = `${window.location.origin}/`
+    const redirectUrl = `${getAuthRedirectUrl()}/auth/confirm`
     const { error } = await supabase.auth.signUp({
       email,
       password,
@@ -64,6 +65,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { error }
   }
 
+  const resendConfirmationEmail = async (email: string) => {
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: {
+        emailRedirectTo: `${getAuthRedirectUrl()}/auth/confirm`
+      }
+    })
+    return { error }
+  }
+
   const signOut = async () => {
     await supabase.auth.signOut()
     window.location.href = '/auth'
@@ -75,6 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signUp,
     signIn,
     signOut,
+    resendConfirmationEmail,
     loading
   }
 

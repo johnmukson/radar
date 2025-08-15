@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase } from '@/integrations/supabase/client'
+import { supabase, getAuthRedirectUrl } from '@/integrations/supabase/client'
 import { useToast } from "@/components/ui/use-toast"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -92,6 +92,7 @@ const UserCreation = () => {
             name: name,
             phone: phone,
           },
+          emailRedirectTo: `${getAuthRedirectUrl()}/auth/confirm`
         },
       });
 
@@ -117,7 +118,7 @@ const UserCreation = () => {
 
       toast({
         title: "Success",
-        description: "User account created successfully! You can now log in.",
+        description: "User account created successfully! A confirmation email has been sent. The user must confirm their email before they can log in.",
       })
       
       // Clear form

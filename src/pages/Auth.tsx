@@ -5,7 +5,9 @@
 
 import React, { useState } from 'react'
 import { supabase } from '@/integrations/supabase/client'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Mail } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
+import { getAuthRedirectUrl } from '@/integrations/supabase/client'
 
 export default function AuthPage() {
   const [email, setEmail] = useState('')
@@ -15,16 +17,39 @@ export default function AuthPage() {
   const [error, setError] = useState('')
   const [showReset, setShowReset] = useState(false)
   const [resetMessage, setResetMessage] = useState('')
+  const [showEmailConfirmation, setShowEmailConfirmation] = useState(false)
+  const [emailConfirmationMessage, setEmailConfirmationMessage] = useState('')
+  const { resendConfirmationEmail } = useAuth()
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError('')
+    setShowEmailConfirmation(false)
+    
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) {
-      setError(error.message)
+      if (error.message.includes('Email not confirmed')) {
+        setShowEmailConfirmation(true)
+        setError('Please check your email and click the confirmation link before signing in.')
+      } else {
+        setError(error.message)
+      }
     } else {
       window.location.href = '/dashboard'
+    }
+    setLoading(false)
+  }
+
+  const handleResendConfirmation = async () => {
+    setLoading(true)
+    setEmailConfirmationMessage('')
+    
+    const { error } = await resendConfirmationEmail(email)
+    if (error) {
+      setEmailConfirmationMessage(`Error: ${error.message}`)
+    } else {
+      setEmailConfirmationMessage('Confirmation email sent! Please check your inbox.')
     }
     setLoading(false)
   }
@@ -35,7 +60,7 @@ export default function AuthPage() {
     setError('')
     setResetMessage('')
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin + '/update-password',
+      redirectTo: `${getAuthRedirectUrl()}/update-password`,
     })
     if (error) {
       setError(error.message)
@@ -86,7 +111,40 @@ export default function AuthPage() {
                 {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
             </div>
+            
             {error && <div className="text-red-500 text-sm text-center">{error}</div>}
+            
+            {showEmailConfirmation && (
+              <div className="rounded-md bg-blue-900/20 border border-blue-600 p-4">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <Mail className="h-5 w-5 text-blue-400" />
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-blue-300">
+                      Email Confirmation Required
+                    </h3>
+                    <div className="mt-2 text-sm text-blue-200">
+                      <p>Please check your email and click the confirmation link before signing in.</p>
+                      {emailConfirmationMessage && (
+                        <p className="mt-2 font-medium">{emailConfirmationMessage}</p>
+                      )}
+                    </div>
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={handleResendConfirmation}
+                        disabled={loading}
+                        className="bg-blue-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                      >
+                        {loading ? 'Sending...' : 'Resend Confirmation Email'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <button
               type="submit"
               className="w-full py-2 rounded bg-blue-600 hover:bg-blue-700 text-white font-semibold"
@@ -98,9 +156,9 @@ export default function AuthPage() {
               <button
                 type="button"
                 className="text-blue-400 hover:underline text-sm"
-                onClick={() => { window.location.href = 'https://radar-wheat.vercel.app/'; }}
+                onClick={() => setShowReset(true)}
               >
-                Login
+                Forgot your password?
               </button>
             </div>
           </form>
