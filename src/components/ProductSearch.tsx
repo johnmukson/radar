@@ -119,7 +119,9 @@ const ProductSearch = () => {
         .from('stock_items')
         .update({ 
           quantity: newQuantity,
-          status: newQuantity === 0 ? 'out_of_stock' : selectedItem.status
+          status: newQuantity === 0 ? 'moved' : selectedItem.status,
+          last_updated_at: new Date().toISOString(),
+          last_updated_by: user?.id || null
         })
         .eq('id', selectedItem.id)
 
@@ -131,17 +133,19 @@ const ProductSearch = () => {
       console.log('Stock item updated successfully')
 
              // Record the movement in history
-       const movementData = {
-         stock_item_id: selectedItem.id,
-         movement_type: 'adjustment',
-         quantity_moved: adjustQuantity,
-         from_branch_id: selectedItem.branch_id,
-         to_branch_id: selectedItem.branch_id, // Same branch for adjustments
-         for_dispenser: user?.id || null, // The user making the adjustment
-         moved_by: user?.id || null,
-         notes: adjustReason || `Adjusted ${adjustQuantity} units of ${selectedItem.product_name}`,
-         movement_date: new Date().toISOString()
-       }
+      const movementData = {
+        stock_item_id: selectedItem.id,
+        movement_type: newQuantity === 0 ? 'completion' : 'adjustment',
+        quantity_moved: adjustQuantity,
+        from_branch_id: selectedItem.branch_id,
+        to_branch_id: selectedItem.branch_id, // Same branch for adjustments
+        for_dispenser: user?.id || null, // The user making the adjustment
+        moved_by: user?.id || null,
+        notes: newQuantity === 0 
+          ? `COMPLETED: ${adjustQuantity} units of ${selectedItem.product_name} - Item fully consumed`
+          : `Adjusted ${adjustQuantity} units of ${selectedItem.product_name} - Remaining: ${newQuantity}`,
+        movement_date: new Date().toISOString()
+      }
 
       console.log('Movement data:', movementData)
 
@@ -156,17 +160,85 @@ const ProductSearch = () => {
 
       console.log('Movement recorded successfully')
 
-      // Update local state
+      // If this is a completion (quantity = 0), create or update a weekly task
+      if (newQuantity === 0) {
+        try {
+          // Check if there's already a weekly task for this product
+          const { data: existingTask, error: taskCheckError } = await supabase
+            .from('weekly_tasks')
+            .select('id, status')
+            .eq('title', `Move ${selectedItem.product_name}`)
+            .eq('assigned_to', user?.id)
+            .eq('status', 'pending')
+            .single()
+
+          if (taskCheckError && taskCheckError.code !== 'PGRST116') {
+            console.error('Error checking existing task:', taskCheckError)
+          }
+
+          if (existingTask) {
+            // Update existing task to completed
+            const { error: updateTaskError } = await supabase
+              .from('weekly_tasks')
+              .update({ 
+                status: 'completed',
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', existingTask.id)
+
+            if (updateTaskError) {
+              console.error('Error updating task to completed:', updateTaskError)
+            } else {
+              console.log('Weekly task marked as completed')
+            }
+          } else {
+            // Create new completed task for this completion
+            const { error: createTaskError } = await supabase
+              .from('weekly_tasks')
+              .insert({
+                title: `Move ${selectedItem.product_name}`,
+                description: `Completed: ${adjustQuantity} units of ${selectedItem.product_name} - Item fully consumed`,
+                assigned_to: user?.id,
+                assigned_by: user?.id,
+                priority: 'medium',
+                status: 'completed',
+                whatsapp_sent: false,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+
+            if (createTaskError) {
+              console.error('Error creating completed task:', createTaskError)
+            } else {
+              console.log('New completed task created')
+            }
+          }
+        } catch (taskError) {
+          console.error('Error handling weekly task for completion:', taskError)
+          // Don't throw error - movement was successful, task creation is bonus
+        }
+      }
+
+      // Update local state to reflect the changes
       setSearchResults(prev => prev.map(item => 
         item.id === selectedItem.id 
-          ? { ...item, quantity: newQuantity, status: newQuantity === 0 ? 'out_of_stock' : item.status }
+          ? { 
+              ...item, 
+              quantity: newQuantity,
+              status: newQuantity === 0 ? 'moved' : item.status
+            }
           : item
       ))
 
-             toast({
-         title: "Success",
-         description: `Adjusted ${adjustQuantity} units of ${selectedItem.product_name}. New quantity: ${newQuantity}`,
-       })
+      // Success message
+      const successMessage = newQuantity === 0 
+        ? `Item completed! ${adjustQuantity} units of ${selectedItem.product_name} have been fully consumed.`
+        : `Quantity adjusted successfully! ${adjustQuantity} units removed from ${selectedItem.product_name}. Remaining: ${newQuantity}`;
+
+      toast({
+        title: newQuantity === 0 ? "Item Completed!" : "Quantity Adjusted",
+        description: successMessage,
+      });
 
       setShowAdjustDialog(false)
       setSelectedItem(null)
@@ -269,18 +341,20 @@ const ProductSearch = () => {
                         </h4>
                         <Badge 
                           variant={
+                            item.status === 'moved' ? 'default' :
                             item.status === 'available' ? 'default' :
                             item.status === 'out_of_stock' ? 'destructive' :
                             item.status === 'low_stock' ? 'secondary' : 'outline'
                           }
                           className={
+                            item.status === 'moved' ? 'bg-green-600 text-white' :
                             item.risk_level === 'critical' ? 'bg-red-500' :
                             item.risk_level === 'high' ? 'bg-orange-500' :
                             item.risk_level === 'medium' ? 'bg-yellow-500' :
                             'bg-green-500'
                           }
                         >
-                          {item.status}
+                          {item.status === 'moved' ? 'Completed' : item.status}
                         </Badge>
                       </div>
                       

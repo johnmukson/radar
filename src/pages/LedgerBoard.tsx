@@ -36,6 +36,7 @@ interface DispenserPerformance {
   pending_tasks: number
   total_adjustments: number
   total_quantity_adjusted: number
+  total_completions: number
   completion_rate: number
   efficiency_score: number
   last_activity: string
@@ -138,8 +139,8 @@ const LedgerBoard = () => {
         const { data: adjustments, error: adjustmentsError } = await supabase
           .from('stock_movement_history')
           .select('*')
+          .in('movement_type', ['adjustment', 'completion'])
           .eq('moved_by', dispenser.user_id)
-          .eq('movement_type', 'adjustment')
           .gte('movement_date', startDate.toISOString())
 
         if (adjustmentsError) throw adjustmentsError
@@ -149,6 +150,12 @@ const LedgerBoard = () => {
         const pendingTasks = tasks?.filter(t => t.status === 'pending').length || 0
         const totalAdjustments = adjustments?.length || 0
         const totalQuantityAdjusted = adjustments?.reduce((sum, adj) => sum + adj.quantity_moved, 0) || 0
+        
+        // Special scoring for completions (fully completed products)
+        const completions = adjustments?.filter(adj => adj.movement_type === 'completion') || []
+        const totalCompletions = completions.length
+        const completionBonus = totalCompletions * 10 // Extra credit for each completed product
+        
         const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0
         // Enhanced scoring that values small quantities and adjustments equally
         const taskScore = completionRate * 0.3 // Reduced weight for tasks
@@ -162,7 +169,7 @@ const LedgerBoard = () => {
         // Bonus for activity frequency (more adjustments = better)
         const activityBonus = totalAdjustments >= 10 ? 20 : totalAdjustments >= 5 ? 10 : 0
         
-        const efficiencyScore = Math.round(taskScore + adjustmentScore + quantityScore + smallAdjustmentBonus + activityBonus)
+        const efficiencyScore = Math.round(taskScore + adjustmentScore + quantityScore + smallAdjustmentBonus + activityBonus + completionBonus)
 
         // Calculate streak (consecutive days with activity)
         const activityDates = new Set()
@@ -210,6 +217,7 @@ const LedgerBoard = () => {
           pending_tasks: pendingTasks,
           total_adjustments: totalAdjustments,
           total_quantity_adjusted: totalQuantityAdjusted,
+          total_completions: totalCompletions,
           completion_rate: completionRate,
           efficiency_score: efficiencyScore,
           last_activity: lastActivity,
@@ -281,6 +289,7 @@ const LedgerBoard = () => {
       case 'sale': return 'bg-green-100 text-green-800'
       case 'transfer': return 'bg-blue-100 text-blue-800'
       case 'adjustment': return 'bg-yellow-100 text-yellow-800'
+      case 'completion': return 'bg-emerald-100 text-emerald-800'
       case 'expiry': return 'bg-red-100 text-red-800'
       default: return 'bg-gray-100 text-gray-800'
     }
@@ -561,10 +570,11 @@ const LedgerBoard = () => {
                           <TableHead>Rank</TableHead>
                           <TableHead>Dispenser</TableHead>
                           <TableHead>Branch</TableHead>
-                                                     <TableHead>Tasks</TableHead>
-                           <TableHead>Adjustments</TableHead>
-                           <TableHead>Quantity Moved</TableHead>
-                           <TableHead>Completion Rate</TableHead>
+                          <TableHead>Tasks</TableHead>
+                          <TableHead>Adjustments</TableHead>
+                          <TableHead>Completions</TableHead>
+                          <TableHead>Quantity Moved</TableHead>
+                          <TableHead>Completion Rate</TableHead>
                           <TableHead>Efficiency Score</TableHead>
                           <TableHead>Streak</TableHead>
                           <TableHead>Last Activity</TableHead>
@@ -600,12 +610,18 @@ const LedgerBoard = () => {
                                  <span>{perf.total_adjustments} adjustments</span>
                                </div>
                              </TableCell>
-                             <TableCell>
-                               <div className="flex items-center gap-2">
-                                 <Package className="h-4 w-4 text-green-500" />
-                                 <span className="font-medium">{perf.total_quantity_adjusted} units</span>
-                               </div>
-                             </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <CheckCircle className="h-4 w-4 text-emerald-500" />
+                                <span className="font-medium text-emerald-600">{perf.total_completions} completed</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Package className="h-4 w-4 text-green-500" />
+                                <span className="font-medium">{perf.total_quantity_adjusted} units</span>
+                              </div>
+                            </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
                                 <Progress value={perf.completion_rate} className="w-16 h-2" />
