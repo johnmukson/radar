@@ -34,6 +34,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useNavigate } from 'react-router-dom'
 import UserCreation from '@/components/UserCreation'
+import { extractErrorMessage } from '@/lib/utils'
 
 type AppRole = Database['public']['Enums']['app_role']
 
@@ -135,8 +136,8 @@ const UserManagement = () => {
       
       setUsers(transformedUsers)
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      toast({ title: "Error", description: message || "Failed to load users", variant: "destructive" })
+      const errorMessage = extractErrorMessage(error, "Failed to load users")
+      toast({ title: "Error", description: errorMessage, variant: "destructive" })
     }
   }
 
@@ -146,8 +147,8 @@ const UserManagement = () => {
       if (error) throw error
       setBranches(data || [])
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      toast({ title: "Error", description: message || "Failed to load branches", variant: "destructive" })
+      const errorMessage = extractErrorMessage(error, "Failed to load branches")
+      toast({ title: "Error", description: errorMessage, variant: "destructive" })
     }
   }
 
@@ -245,10 +246,8 @@ const UserManagement = () => {
       }, 500);
     } catch (error: unknown) {
       console.error('Error in handleAssignRole:', error);
-      const message = error instanceof Error ? error.message : 
-                     typeof error === 'object' && error !== null ? JSON.stringify(error) : 
-                     String(error);
-      toast({ title: "Error", description: message || "Failed to assign role.", variant: "destructive" });
+      const errorMessage = extractErrorMessage(error, "Failed to assign role")
+      toast({ title: "Error", description: errorMessage, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -279,8 +278,8 @@ const UserManagement = () => {
       setShowEditDialog(false);
       await loadUsers();
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      toast({ title: "Error", description: message || "Failed to update user.", variant: "destructive" });
+      const errorMessage = extractErrorMessage(error, "Failed to update user")
+      toast({ title: "Error", description: errorMessage, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -299,8 +298,8 @@ const UserManagement = () => {
       toast({ title: "Success", description: "User deleted successfully." });
       await loadUsers();
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      toast({ title: "Error", description: message || "Failed to delete user", variant: "destructive" });
+      const errorMessage = extractErrorMessage(error, "Failed to delete user")
+      toast({ title: "Error", description: errorMessage, variant: "destructive" });
     } finally {
       setLoading(false);
     }

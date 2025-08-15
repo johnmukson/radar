@@ -1,33 +1,22 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUserRole } from '@/hooks/useUserRole'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
-import { Badge } from '@/components/ui/badge'
-import { useToast } from '@/hooks/use-toast'
-import { supabase } from '@/integrations/supabase/client'
-import { format } from 'date-fns'
-import { isExpired } from '@/utils/expiryUtils'
-import { 
-  Clock, 
-  Search, 
-  Filter, 
-  FileText, 
-  AlertTriangle,
-  Download,
-  Trash2,
-  BarChart2,
-  TrendingUp,
-  TrendingDown
-} from 'lucide-react'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Progress } from '@/components/ui/progress'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Shield, Search, Filter, Download, ArrowUpDown, Calendar, Package, Building, User, Trophy, Target, TrendingUp, TrendingDown, Award, Clock, CheckCircle, XCircle, AlertTriangle, Trash2, FileText, BarChart2 } from 'lucide-react'
+import { supabase } from '@/integrations/supabase/client'
+import { useToast } from '@/hooks/use-toast'
+import { format } from 'date-fns'
+import { extractErrorMessage } from '@/lib/utils'
 
 interface StockItem {
   id: string
@@ -85,10 +74,10 @@ const ExpiryManager = () => {
       setStockItems(items)
       setTotalCount(count || 0)
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error, 'Failed to fetch stock items')
       toast({
         title: 'Error',
-        description: message || 'Failed to fetch stock items',
+        description: errorMessage,
         variant: 'destructive',
       })
     } finally {
@@ -132,10 +121,10 @@ const ExpiryManager = () => {
       setSelectedItem(null)
       fetchStockItems()
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error, 'Failed to remove item')
       toast({
         title: 'Error',
-        description: message || 'Failed to remove item',
+        description: errorMessage,
         variant: 'destructive',
       })
     }
@@ -146,7 +135,7 @@ const ExpiryManager = () => {
     
     try {
       // Get only expired items
-      const expiredItems = stockItems.filter(item => isExpired(item.expiry_date))
+      const expiredItems = stockItems.filter(item => item.days_until_expiry < 0)
       
       if (expiredItems.length === 0) {
         toast({
@@ -205,10 +194,10 @@ const ExpiryManager = () => {
         })
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error, 'Failed to perform bulk delete')
       toast({
         title: "Error",
-        description: message || "Failed to perform bulk delete",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -233,7 +222,7 @@ const ExpiryManager = () => {
       const metrics = {
         criticalItems: data.filter(item => item.risk_level === 'critical').length,
         nearExpiryItems: data.filter(item => item.risk_level === 'high').length,
-        expiredItems: data.filter(item => isExpired(item.expiry_date)).length,
+        expiredItems: data.filter(item => item.days_until_expiry < 0).length,
         totalItems: data.length,
         criticalValue: data
           .filter(item => item.risk_level === 'critical')
@@ -242,7 +231,7 @@ const ExpiryManager = () => {
           .filter(item => item.risk_level === 'high')
           .reduce((sum, item) => sum + (item.quantity * item.unit_price), 0),
         expiredValue: data
-          .filter(item => isExpired(item.expiry_date))
+          .filter(item => item.days_until_expiry < 0)
           .reduce((sum, item) => sum + (item.quantity * item.unit_price), 0),
         totalValue: data.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0)
       }
@@ -256,11 +245,11 @@ const ExpiryManager = () => {
         item.quantity.toString(),
         item.unit_price.toString(),
         (item.quantity * item.unit_price).toString(),
-        isExpired(item.expiry_date)
+        item.days_until_expiry < 0
           ? 'Expired'
-          : item.days_to_expiry <= 30
+          : item.days_until_expiry <= 30
           ? 'Critical'
-          : item.days_to_expiry <= 60
+          : item.days_until_expiry <= 60
           ? 'Near Expiry'
           : 'Good',
       ])
@@ -284,10 +273,10 @@ const ExpiryManager = () => {
 
       setShowReportDialog(false)
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error, 'Failed to generate report')
       toast({
         title: 'Error',
-        description: message || 'Failed to generate report',
+        description: errorMessage,
         variant: 'destructive',
       })
     }
@@ -299,15 +288,15 @@ const ExpiryManager = () => {
     
     const matchesFilter = selectedFilter === 'all' ||
                          (selectedFilter === 'critical' && item.risk_level === 'critical') ||
-                         (selectedFilter === 'expired' && isExpired(item.expiry_date)) ||
-                         (selectedFilter === 'expiring-soon' && item.days_until_expiry <= 30 && item.days_until_expiry >= 0 && !isExpired(item.expiry_date))
+                         (selectedFilter === 'expired' && item.days_until_expiry < 0) ||
+                         (selectedFilter === 'expiring-soon' && item.days_until_expiry <= 30 && item.days_until_expiry >= 0)
 
     return matchesSearch && matchesFilter
   })
 
   const totalItems = stockItems.length
   const criticalItems = stockItems.filter(item => item.risk_level === 'critical').length
-  const expiredItems = stockItems.filter(item => isExpired(item.expiry_date)).length
+  const expiredItems = stockItems.filter(item => item.days_until_expiry < 0).length
   const totalValue = stockItems.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0)
 
   return (
@@ -321,46 +310,22 @@ const ExpiryManager = () => {
           </div>
           <div className="flex items-center gap-4">
             {expiredItems > 0 && (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button 
-                    variant="destructive"
-                    className="bg-red-600 hover:bg-red-700 text-white border-red-600 hover:border-red-700"
-                    disabled={isBulkDeleting}
-                    title="Delete expired stock items only"
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    {isBulkDeleting ? 'Deleting Expired...' : `Delete Expired (${expiredItems})`}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle className="text-red-600">⚠️ Delete Expired Stock Items</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      <span className="text-red-600 font-medium">⚠️ WARNING: This will permanently delete ALL {expiredItems} EXPIRED stock items from the database.</span>
-                      <br /><br />
-                      This action cannot be undone and will permanently remove all expired stock items from the system.
-                      <br /><br />
-                      <strong>Are you absolutely sure you want to continue?</strong>
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={handleBulkDelete}
-                      className="bg-red-600 text-white hover:bg-red-700 border-red-600 hover:border-red-700"
-                    >
-                      {isBulkDeleting ? 'Deleting Expired Items...' : 'Delete Expired Items'}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <Button 
+                variant="destructive"
+                className="bg-red-600 hover:bg-red-700 text-white border-red-600 hover:border-red-700"
+                disabled={isBulkDeleting}
+                onClick={handleBulkDelete}
+                title="Delete expired stock items only"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                {isBulkDeleting ? 'Deleting Expired...' : `Delete Expired (${expiredItems})`}
+              </Button>
             )}
             <Button 
               className="bg-blue-600 hover:bg-blue-700 flex items-center gap-2"
               onClick={() => setShowReportDialog(true)}
             >
-              <FileText className="h-4 w-4" />
+              <Download className="h-4 w-4" />
               Generate Report
             </Button>
           </div>
@@ -383,7 +348,7 @@ const ExpiryManager = () => {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Items</CardTitle>
-              <BarChart2 className="h-4 w-4 text-muted-foreground" />
+              <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{totalItems}</div>
@@ -473,7 +438,7 @@ const ExpiryManager = () => {
                 ) : (
                   <div className="space-y-4">
                     {filteredItems.map((item) => (
-                      <Card key={item.id} className={`${isExpired(item.expiry_date) ? 'border-destructive/50 bg-destructive/5' : ''}`}>
+                      <Card key={item.id} className={`${item.days_until_expiry < 0 ? 'border-destructive/50 bg-destructive/5' : ''}`}>
                         <CardHeader>
                           <div className="flex justify-between items-start">
                             <div>
@@ -491,7 +456,7 @@ const ExpiryManager = () => {
                               </CardDescription>
                             </div>
                             <div className="flex gap-2 items-center">
-                              {isExpired(item.expiry_date) ? (
+                              {item.days_until_expiry < 0 ? (
                                 <Badge variant="destructive">Expired</Badge>
                               ) : item.days_until_expiry <= 30 ? (
                                 <Badge variant="destructive">Critical</Badge>
@@ -518,7 +483,7 @@ const ExpiryManager = () => {
                             >
                               Adjust Quantity
                             </Button>
-                            {(hasAdminAccess || hasDispenserAccess) && isExpired(item.expiry_date) && (
+                            {(hasAdminAccess || hasDispenserAccess) && item.days_until_expiry < 0 && (
                               <Button
                                 variant="destructive"
                                 size="sm"
@@ -562,14 +527,14 @@ const ExpiryManager = () => {
                   <div className="flex items-center justify-center p-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                   </div>
-                ) : stockItems.filter(item => isExpired(item.expiry_date)).length === 0 ? (
+                ) : stockItems.filter(item => item.days_until_expiry < 0).length === 0 ? (
                   <div className="text-center text-muted-foreground py-8">
                     No expired items found
                   </div>
                 ) : (
                   <div className="space-y-4">
                     {stockItems
-                      .filter(item => isExpired(item.expiry_date))
+                      .filter(item => item.days_until_expiry < 0)
                       .map((item) => (
                         <Card key={item.id} className="border-destructive/50 bg-destructive/5">
                           <CardHeader>
@@ -606,7 +571,7 @@ const ExpiryManager = () => {
                               >
                                 Adjust Quantity
                               </Button>
-                              {(hasAdminAccess || hasDispenserAccess) && isExpired(item.expiry_date) && (
+                              {(hasAdminAccess || hasDispenserAccess) && item.days_until_expiry < 0 && (
                                 <Button
                                   variant="destructive"
                                   size="sm"
@@ -711,7 +676,7 @@ const ExpiryManager = () => {
           </DialogHeader>
           <div className="py-4">
             <Label className="text-slate-300">Reason for Removal</Label>
-            <Textarea
+            <Input
               value={removeReason}
               onChange={(e) => setRemoveReason(e.target.value)}
               className="mt-2 bg-slate-700 border-slate-600 text-white"

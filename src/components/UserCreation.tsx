@@ -1,12 +1,16 @@
-import { useState, useEffect } from 'react'
-import { supabase, getAuthRedirectUrl } from '@/integrations/supabase/client'
-import { useToast } from "@/components/ui/use-toast"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { UserPlus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { UserPlus, Mail, Lock, User, Phone, Building, Shield, Eye, EyeOff, ArrowLeft } from 'lucide-react'
+import { supabase, getAuthRedirectUrl } from '@/integrations/supabase/client'
+import { useToast } from '@/hooks/use-toast'
+import { extractErrorMessage } from '@/lib/utils'
 import type { Database } from '@/integrations/supabase/types'
 
 type AppRole = Database['public']['Enums']['app_role'];
@@ -136,11 +140,11 @@ const UserCreation = () => {
       }, 2000)
 
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('Create user error:', message)
+      const errorMessage = extractErrorMessage(error, "Failed to create user account")
+      console.error('Create user error:', errorMessage)
       toast({
         title: "Error",
-        description: message || "Failed to create user account",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {

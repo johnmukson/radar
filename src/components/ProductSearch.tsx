@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { useAuth } from '@/contexts/AuthContext'
 import { format } from 'date-fns'
+import { extractErrorMessage } from '@/lib/utils'
 
 interface StockItem {
   id: string
@@ -79,10 +80,10 @@ const ProductSearch = () => {
 
       setSearchResults(itemsWithCalculations)
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error, "Failed to search products")
       toast({
         title: "Error",
-        description: message || "Failed to search products",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -135,11 +136,11 @@ const ProductSearch = () => {
          movement_type: 'adjustment',
          quantity_moved: adjustQuantity,
          from_branch_id: selectedItem.branch_id,
+         to_branch_id: selectedItem.branch_id, // Same branch for adjustments
+         for_dispenser: user?.id || null, // The user making the adjustment
          moved_by: user?.id || null,
          notes: adjustReason || `Adjusted ${adjustQuantity} units of ${selectedItem.product_name}`,
-         movement_date: new Date().toISOString(),
-         created_at: new Date().toISOString(),
-         updated_at: new Date().toISOString()
+         movement_date: new Date().toISOString()
        }
 
       console.log('Movement data:', movementData)
@@ -173,14 +174,16 @@ const ProductSearch = () => {
       setAdjustReason('')
     } catch (error: unknown) {
       console.error('Full error object:', error)
-      const message = error instanceof Error ? error.message : String(error)
+      
+      // Use the utility function for better error message extraction
+      const errorMessage = extractErrorMessage(error, "Failed to adjust quantity")
       
       // If it's a movement history error, still show success for the stock update
-      if (message.includes('stock_movement_history') || message.includes('movement')) {
-                 toast({
-           title: "Partial Success",
-           description: `Stock updated but movement history failed. New quantity: ${selectedItem.quantity - adjustQuantity}`,
-         })
+      if (errorMessage.toLowerCase().includes('stock_movement_history') || errorMessage.toLowerCase().includes('movement')) {
+        toast({
+          title: "Partial Success",
+          description: `Stock updated but movement history failed. New quantity: ${selectedItem.quantity - adjustQuantity}`,
+        })
         
         // Update local state even if movement history failed
         setSearchResults(prev => prev.map(item => 
@@ -196,7 +199,7 @@ const ProductSearch = () => {
       } else {
         toast({
           title: "Error",
-          description: message || "Failed to adjust quantity",
+          description: errorMessage,
           variant: "destructive",
         })
       }

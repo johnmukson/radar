@@ -57,8 +57,10 @@ const RoleAssignmentForm: React.FC<RoleAssignmentFormProps> = ({
         return 'Regional Manager'
       case 'admin':
         return 'Admin'
-      case 'user':
-        return 'User'
+      case 'dispenser':
+        return 'Dispenser'
+      case 'doctor':
+        return 'Doctor (View Only)'
       default:
         return role
     }
@@ -93,7 +95,8 @@ const RoleAssignmentForm: React.FC<RoleAssignmentFormProps> = ({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="user">{getRoleDisplayName('user')}</SelectItem>
+                <SelectItem value="dispenser">{getRoleDisplayName('dispenser')}</SelectItem>
+                <SelectItem value="doctor">{getRoleDisplayName('doctor')}</SelectItem>
                 <SelectItem value="admin">{getRoleDisplayName('admin')}</SelectItem>
                 <SelectItem value="regional_manager">{getRoleDisplayName('regional_manager')}</SelectItem>
                 <SelectItem value="branch_system_admin">{getRoleDisplayName('branch_system_admin')}</SelectItem>

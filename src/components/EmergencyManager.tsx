@@ -133,7 +133,7 @@ const EmergencyManager = () => {
     try {
       const [stockResponse, dispensersResponse, assignmentsResponse] = await Promise.all([
               supabase.from('stock_items').select('*').order('created_at', { ascending: false }),
-      supabase.from('users_with_roles').select('user_id, name, phone').eq('role', 'dispenser'),
+      supabase.from('users_with_roles').select('user_id, name, phone, branch_id, branch_name').eq('role', 'dispenser'),
         supabase.from('emergency_assignments').select(`
           *,
           stock_item:stock_items(id, product_name, branch_id),
@@ -168,7 +168,8 @@ const EmergencyManager = () => {
         name: d.name,
         phone: d.phone,
         status: 'active',
-        whatsapp_number: d.whatsapp_number || d.phone || null
+        branch: d.branch_name || d.branch_id, // Ensure branch is available
+        whatsapp_number: d.phone // Use phone as whatsapp number
       }))
       setDispensers(mappedDispensers)
       setEmergencyAssignments(assignmentsResponse.data || [])
@@ -176,10 +177,26 @@ const EmergencyManager = () => {
       // Calculate workloads
       await calculateDispenserWorkloads(mappedDispensers, assignmentsResponse.data || [])
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      // Better error message extraction
+      let errorMessage = "Failed to fetch data"
+      
+      if (error && typeof error === 'object') {
+        if ('message' in error && typeof error.message === 'string') {
+          errorMessage = error.message
+        } else if ('error' in error && typeof error.error === 'string') {
+          errorMessage = error.error
+        } else if ('details' in error && typeof error.details === 'string') {
+          errorMessage = error.details
+        } else if ('hint' in error && typeof error.hint === 'string') {
+          errorMessage = error.hint
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
       toast({
         title: "Error",
-        description: message || "Failed to fetch data",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -372,10 +389,26 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
         description: `${item.product_name} has been marked as emergency`,
       })
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      // Better error message extraction
+      let errorMessage = "Failed to declare emergency"
+      
+      if (error && typeof error === 'object') {
+        if ('message' in error && typeof error.message === 'string') {
+          errorMessage = error.message
+        } else if ('error' in error && typeof error.error === 'string') {
+          errorMessage = error.error
+        } else if ('details' in error && typeof error.details === 'string') {
+          errorMessage = error.details
+        } else if ('hint' in error && typeof error.hint === 'string') {
+          errorMessage = error.hint
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
       toast({
         title: "Error",
-        description: message || "Failed to declare emergency",
+        description: errorMessage,
         variant: "destructive",
       })
     }

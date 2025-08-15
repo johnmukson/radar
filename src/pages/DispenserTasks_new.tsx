@@ -173,7 +173,7 @@ const DispenserTasks = () => {
         return;
       }
       
-      let error: any = null;
+      let error: Error | null = null;
       
       // Update based on source type
       if (task.source_type === 'weekly_task') {

@@ -1,14 +1,21 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useToast } from '@/hooks/use-toast'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Progress } from '@/components/ui/progress'
+import { Package, Upload, Download, Plus, Search, Filter, BarChart3, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, XCircle, Clock, DollarSign, Building, User, Calendar, Trash2, Edit, Eye, EyeOff, FileText, CheckSquare, XSquare, AlertCircle } from 'lucide-react'
 import { supabase } from '@/integrations/supabase/client'
+import { useToast } from '@/hooks/use-toast'
+import { format } from 'date-fns'
+import { extractErrorMessage } from '@/lib/utils'
 import * as XLSX from 'xlsx'
 import ManualProductDialog from '@/components/stock-manager/ManualProductDialog'
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui/card'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
-import { Trash2 } from 'lucide-react'
 
 interface StockItem {
   product_name: string
@@ -61,8 +68,8 @@ const StockUpload = () => {
       console.log('✅ Branches loaded:', data)
       setBranches(data || [])
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('❌ Error loading branches:', message)
+      const errorMessage = extractErrorMessage(error, "Failed to load branches")
+      console.error('❌ Error loading branches:', errorMessage)
     }
   }
 
@@ -185,9 +192,10 @@ const StockUpload = () => {
           }
         } catch (error) {
           console.error('❌ Exception fetching branches:', error)
+          const errorMessage = extractErrorMessage(error, "Failed to load branches from database")
           toast({
             title: "Error",
-            description: `Failed to load branches from database: ${error instanceof Error ? error.message : String(error)}`,
+            description: errorMessage,
             variant: "destructive",
           })
           return
@@ -421,10 +429,10 @@ const StockUpload = () => {
 
       clearUploadData()
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error, "Failed to delete uploaded items")
       toast({
         title: "Error",
-        description: message || "Failed to delete uploaded items",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -595,10 +603,10 @@ const StockUpload = () => {
         })
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error, "Failed to perform bulk delete")
       toast({
         title: "Error",
-        description: message || "Failed to perform bulk delete",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {

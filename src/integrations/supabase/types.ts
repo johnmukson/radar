@@ -630,7 +630,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "system_admin" | "branch_system_admin" | "regional_manager" | "admin" | "dispenser"
+      app_role: "system_admin" | "branch_system_admin" | "regional_manager" | "admin" | "dispenser" | "doctor"
     }
     CompositeTypes: {
       [_ in never]: never

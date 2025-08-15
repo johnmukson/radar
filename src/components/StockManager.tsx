@@ -1,7 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { useToast } from '@/hooks/use-toast'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Progress } from '@/components/ui/progress'
+import { Package, Upload, Download, Plus, Search, Filter, BarChart3, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, XCircle, Clock, DollarSign, Building, User, Calendar, Trash2, Edit, Eye, EyeOff } from 'lucide-react'
 import { supabase } from '@/integrations/supabase/client'
+import { useToast } from '@/hooks/use-toast'
+import { format } from 'date-fns'
+import { extractErrorMessage } from '@/lib/utils'
 import ManualProductDialog from './stock-manager/ManualProductDialog'
 import StockFileUpload from './stock-manager/StockFileUpload'
 import StockUpdatesPreview from './stock-manager/StockUpdatesPreview'
@@ -65,10 +77,10 @@ const StockManager = () => {
 
       setStockItems(transformedData)
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error, "Failed to fetch stock items")
       toast({
         title: "Error",
-        description: message || "Failed to fetch stock items",
+        description: errorMessage,
         variant: "destructive",
       })
     }
@@ -130,10 +142,10 @@ const StockManager = () => {
       const form = document.getElementById('stock-file-form') as HTMLFormElement
       form?.reset()
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error, "Failed to apply stock updates")
       toast({
         title: "Error",
-        description: message || "Failed to apply stock updates",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {

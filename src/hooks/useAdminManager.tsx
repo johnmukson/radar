@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useToast } from '@/hooks/use-toast'
 import { supabase } from '@/integrations/supabase/client'
+import { useToast } from '@/hooks/use-toast'
+import { extractErrorMessage } from '@/lib/utils'
 import type { Database } from '@/integrations/supabase/types'
 
 type AppRole = Database['public']['Enums']['app_role']
@@ -49,11 +50,11 @@ export const useAdminManager = () => {
       if (error) throw error
       setBranches(data || [])
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('Error loading branches:', message)
+      const errorMessage = extractErrorMessage(error, "Failed to load branches")
+      console.error('Error loading branches:', errorMessage)
       toast({
         title: "Error",
-        description: "Failed to load branches",
+        description: errorMessage,
         variant: "destructive",
       })
     }
@@ -73,11 +74,11 @@ export const useAdminManager = () => {
       if (error) throw error
       setUserRoles(data || [])
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('Error loading user roles:', message)
+      const errorMessage = extractErrorMessage(error, "Failed to load user roles")
+      console.error('Error loading user roles:', errorMessage)
       toast({
         title: "Error",
-        description: "Failed to load user roles",
+        description: errorMessage,
         variant: "destructive",
       })
     }
@@ -108,11 +109,11 @@ export const useAdminManager = () => {
 
       await loadUserRoles()
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('Error removing user role:', message)
+      const errorMessage = extractErrorMessage(error, "Failed to remove user role")
+      console.error('Error removing user role:', errorMessage)
       toast({
         title: "Error",
-        description: message || "Failed to remove user role",
+        description: errorMessage,
         variant: "destructive",
       })
     }

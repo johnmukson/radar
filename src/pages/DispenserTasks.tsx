@@ -58,6 +58,17 @@ function getNext12Months() {
   return months;
 }
 
+interface AdjustItem {
+  id: string
+  source_type: 'weekly_task' | 'assigned_product'
+  display_name: string
+  quantity: number
+  branch_id?: string
+  assigned_to?: string
+  product_name?: string
+  branch?: string
+}
+
 const DispenserTasks = () => {
   const { user, signOut } = useAuth()
   const { hasAdminAccess, loading: roleLoading } = useUserRole()
@@ -83,7 +94,7 @@ const DispenserTasks = () => {
   
   // Adjust quantity states
   const [adjustDialogOpen, setAdjustDialogOpen] = useState(false)
-  const [adjustItem, setAdjustItem] = useState<any>(null)
+  const [adjustItem, setAdjustItem] = useState<AdjustItem | null>(null)
   const [adjustQty, setAdjustQty] = useState(1)
   const [adjustLoading, setAdjustLoading] = useState(false)
 
@@ -159,6 +170,151 @@ const DispenserTasks = () => {
     }
   }, [toast, showAllTasks]);
 
+  // New function to fetch ALL weekly assignments for the current week
+  const fetchAllWeeklyAssignments = useCallback(async (month: string, week: string) => {
+    setLoading(true);
+    try {
+      console.log('fetchAllWeeklyAssignments called with month:', month, 'week:', week);
+      
+      // Fetch ALL weekly tasks for the current week/month
+      const { data, error } = await supabase
+        .from('weekly_tasks')
+        .select(`
+          *,
+          assigned_user:users!assigned_to(id, name, phone),
+          assigned_by_user:users!assigned_by(id, name)
+        `)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      
+      console.log('Data fetched from weekly_tasks:', data);
+      console.log('Number of tasks fetched:', data?.length || 0);
+      
+      // Transform weekly tasks to the expected interface
+      const transformedData = (data || []).map((task) => {
+        return {
+          id: task.id,
+          source_type: 'weekly_task' as const,
+          display_name: task.title,
+          description: task.description,
+          assigned_to: task.assigned_to,
+          assigned_by: task.assigned_by,
+          date_field: task.created_at.split('T')[0], // Use created_at as date
+          priority: task.priority,
+          status: task.status,
+          whatsapp_sent: task.whatsapp_sent,
+          whatsapp_sent_at: task.whatsapp_sent_at,
+          created_at: task.created_at,
+          updated_at: task.updated_at,
+          assigned_user_name: task.assigned_user?.name || null,
+          assigned_user_phone: task.assigned_user?.phone || null,
+          assigned_by_user_name: task.assigned_by_user?.name || null,
+          product_name: null,
+          quantity: null,
+          unit_price: null,
+          expiry_date: null,
+          branch_id: null,
+          branch_name: null,
+          risk_level: task.priority === 'urgent' ? 'critical' : 
+                     task.priority === 'high' ? 'high' : 
+                     task.priority === 'medium' ? 'medium' : 'low'
+        };
+      });
+      
+      console.log('Transformed data:', transformedData);
+      setAssignedProducts(transformedData);
+      
+    } catch (error: unknown) {
+      console.error('Error in fetchAllWeeklyAssignments:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      toast({
+        title: "Error",
+        description: message || "Failed to fetch all weekly assignments",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  // Function to create sample weekly tasks for demonstration
+  const createSampleWeeklyTasks = useCallback(async () => {
+    if (!hasAdminAccess) {
+      toast({ title: 'Access Denied', description: 'Only admins can create sample tasks', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Sample products for the week
+      const sampleProducts = [
+        'AMIKACIN 500MG IND INJ',
+        'PIMCEF/MEGAPIME 1G INJ',
+        'CHLOROCIDE SYRUP',
+        'CLOPI-DENK 75MG',
+        'TIXYLIX INFANT COUGH SYRUP',
+        'PARACETAMOL 500MG',
+        'AMOXICILLIN 250MG'
+      ];
+
+      // Get all dispensers
+      const { data: dispensers, error: dispensersError } = await supabase
+        .from('users')
+        .select('id, name, email')
+        .eq('role', 'dispenser');
+
+      if (dispensersError) throw dispensersError;
+
+      // Create 7 tasks for each dispenser (7 × 6 = 42 total)
+      const tasksToCreate = [];
+      for (const dispenser of dispensers || []) {
+        for (let i = 0; i < 7; i++) {
+          const product = sampleProducts[i];
+          const priority = i < 2 ? 'high' : i < 4 ? 'medium' : 'low';
+          
+          tasksToCreate.push({
+            title: `Move ${product}`,
+            description: `Move ${product} (Risk: ${priority}, Expiry: 2025-12-31)`,
+            assigned_to: dispenser.id,
+            assigned_by: user?.id,
+            priority: priority,
+            status: 'pending',
+            whatsapp_sent: false,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+        }
+      }
+
+      // Insert all tasks
+      const { error: insertError } = await supabase
+        .from('weekly_tasks')
+        .insert(tasksToCreate);
+
+      if (insertError) throw insertError;
+
+      toast({ 
+        title: 'Sample Weekly Tasks Created', 
+        description: `Created ${tasksToCreate.length} sample tasks for ${dispensers?.length || 0} dispensers` 
+      });
+
+      // Refresh the list
+      await fetchAllWeeklyAssignments(selectedMonth, selectedWeek);
+      
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({
+        title: "Error",
+        description: message || "Failed to create sample weekly tasks",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [hasAdminAccess, user, selectedMonth, selectedWeek, fetchAllWeeklyAssignments, toast]);
+
   // Load dispensers
   useEffect(() => {
     const loadInitialData = async () => {
@@ -216,7 +372,7 @@ const DispenserTasks = () => {
         return;
       }
       
-      let error: any = null;
+      let error: Error | null = null;
       
       // Update based on source type
       if (task.source_type === 'weekly_task') {
@@ -299,10 +455,26 @@ const DispenserTasks = () => {
         description: "Task created successfully",
       })
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      // Better error message extraction
+      let errorMessage = "Failed to create task"
+      
+      if (error && typeof error === 'object') {
+        if ('message' in error && typeof error.message === 'string') {
+          errorMessage = error.message
+        } else if ('error' in error && typeof error.error === 'string') {
+          errorMessage = error.error
+        } else if ('details' in error && typeof error.details === 'string') {
+          errorMessage = error.details
+        } else if ('hint' in error && typeof error.hint === 'string') {
+          errorMessage = error.hint
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
       toast({
         title: "Error",
-        description: message || "Failed to create task",
+        description: errorMessage,
         variant: "destructive",
       })
     }
@@ -314,35 +486,444 @@ const DispenserTasks = () => {
       return;
     }
 
-    const headers = ['Type', 'Title/Product', 'Description', 'Date', 'Status', 'Priority/Risk', 'Week', 'Day of Week', 'Quantity', 'Unit Price', 'Branch'];
+    // Enhanced headers for comprehensive weekly assignment list
+    const headers = [
+      'Week', 
+      'Month', 
+      'Dispenser Name', 
+      'Dispenser Email', 
+      'Day of Week', 
+      'Task/Product Title', 
+      'Description', 
+      'Priority/Risk Level', 
+      'Status', 
+      'Due Date', 
+      'Quantity', 
+      'Unit Price', 
+      'Branch', 
+      'Created Date'
+    ];
+
+    // Create comprehensive weekly assignment list
     const csvData = assignedProducts.map(task => [
-      task.source_type === 'weekly_task' ? 'Task' : 'Product',
-      task.display_name,
-      task.description || '',
-      task.date_field,
-      task.status,
-      task.source_type === 'weekly_task' ? task.priority : task.risk_level,
-      selectedWeek,
-      new Date(task.date_field).toLocaleDateString('en-US', { weekday: 'long' }),
-      task.quantity || '',
-      task.unit_price || '',
-      task.branch_name || ''
+      selectedWeek, // Week number
+      selectedMonth, // Month
+      task.assigned_user_name || 'Unknown', // Dispenser name
+      task.assigned_user_phone || 'No phone', // Dispenser contact
+      new Date(task.date_field).toLocaleDateString('en-US', { weekday: 'long' }), // Day of week
+      task.display_name, // Task/Product title
+      task.description || '', // Description
+      task.source_type === 'weekly_task' ? task.priority : task.risk_level, // Priority/Risk
+      task.status, // Status
+      task.date_field, // Due date
+      task.quantity || '', // Quantity
+      task.unit_price || '', // Unit price
+      task.branch_name || 'Main Branch', // Branch
+      new Date(task.created_at).toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      }) // Created date
     ]);
 
-    const csvContent = [headers, ...csvData].map(row => row.join(',')).join('\n');
+    // Sort by dispenser name, then by day of week for better organization
+    csvData.sort((a, b) => {
+      // First sort by dispenser name
+      const dispenserA = a[2];
+      const dispenserB = b[2];
+      if (dispenserA !== dispenserB) {
+        return dispenserA.localeCompare(dispenserB);
+      }
+      
+      // Then sort by day of week
+      const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const dayA = a[4];
+      const dayB = b[4];
+      return dayOrder.indexOf(dayA) - dayOrder.indexOf(dayB);
+    });
+
+    // Add a summary row at the top
+    const summaryRow = [
+      `Week ${selectedWeek} Summary`,
+      selectedMonth,
+      `Total Assignments: ${assignedProducts.length}`,
+      `Expected: 42 (7 products × 6 dispensers)`,
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      ''
+    ];
+
+    const csvContent = [headers, summaryRow, ...csvData].map(row => 
+      row.map(cell => `"${cell}"`).join(',')
+    ).join('\n');
+
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `assignments-week-${selectedWeek}-${selectedMonth}.csv`;
+    link.download = `weekly-assignments-week-${selectedWeek}-${selectedMonth}-${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
     URL.revokeObjectURL(url);
 
-    toast({ title: 'Download started', description: 'CSV file is being downloaded' });
+    toast({ 
+      title: 'Weekly Assignment List Downloaded', 
+      description: `CSV file with ${assignedProducts.length} assignments for Week ${selectedWeek} is ready to share with dispensers` 
+    });
   };
 
-  const handleOpenAdjust = (item: any) => {
-    setAdjustItem(item)
+  // New function to download ALL tasks (not just weekly)
+  const handleDownloadAllTasks = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch ALL tasks from the system
+      const { data, error } = await supabase
+        .from('weekly_tasks')
+        .select(`
+          *,
+          assigned_user:users!assigned_to(id, name, phone),
+          assigned_by_user:users!assigned_by(id, name)
+        `)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        toast({ title: 'No tasks found', variant: 'destructive' });
+        return;
+      }
+
+      // Enhanced headers for all tasks
+      const headers = [
+        'Task ID',
+        'Task Title', 
+        'Description', 
+        'Assigned To', 
+        'Assigned By', 
+        'Priority', 
+        'Status', 
+        'Due Date', 
+        'WhatsApp Sent', 
+        'Created Date', 
+        'Updated Date'
+      ];
+
+      // Create data for all tasks
+      const csvData = data.map(task => [
+        task.id,
+        task.title,
+        task.description || '',
+        task.assigned_user?.name || 'Unknown',
+        task.assigned_by_user?.name || 'Unknown',
+        task.priority,
+        task.status,
+        task.due_date || 'No due date',
+        task.whatsapp_sent ? 'Yes' : 'No',
+        new Date(task.created_at).toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'short', 
+          day: 'numeric' 
+        }),
+        new Date(task.updated_at).toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'short', 
+          day: 'numeric' 
+        })
+      ]);
+
+      // Sort by created date (newest first)
+      csvData.sort((a, b) => new Date(b[10]).getTime() - new Date(a[10]).getTime());
+
+      // Add a summary row at the top
+      const summaryRow = [
+        `All Tasks Summary`,
+        `Total Tasks: ${data.length}`,
+        `Date Range: ${new Date(data[data.length - 1]?.created_at).toLocaleDateString()} - ${new Date(data[0]?.created_at).toLocaleDateString()}`,
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        '',
+        ''
+      ];
+
+      const csvContent = [headers, summaryRow, ...csvData].map(row => 
+        row.map(cell => `"${cell}"`).join(',')
+      ).join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `all-tasks-${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast({ 
+        title: 'All Tasks Downloaded', 
+        description: `CSV file with ${data.length} total tasks from the system` 
+      });
+      
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({
+        title: "Error",
+        description: message || "Failed to download all tasks",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // New function to download ONLY weekly tasks (42 per week)
+  const handleDownloadWeeklyTasksOnly = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch ONLY weekly tasks for the current week/month
+      const { data, error } = await supabase
+        .from('weekly_tasks')
+        .select(`
+          *,
+          assigned_user:users!assigned_to(id, name, phone),
+          assigned_by_user:users!assigned_by(id, name)
+        `)
+        .eq('status', 'pending') // Only pending tasks for the week
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        toast({ title: 'No weekly tasks found', variant: 'destructive' });
+        return;
+      }
+
+      // Enhanced headers for weekly tasks only
+      const headers = [
+        'Week', 
+        'Month', 
+        'Dispenser Name', 
+        'Dispenser Contact', 
+        'Day of Week', 
+        'Task Title', 
+        'Description', 
+        'Priority', 
+        'Status', 
+        'Created Date'
+      ];
+
+      // Create data for weekly tasks only
+      const csvData = data.map(task => [
+        selectedWeek,
+        selectedMonth,
+        task.assigned_user?.name || 'Unknown',
+        task.assigned_user?.phone || 'No phone',
+        new Date(task.created_at).toLocaleDateString('en-US', { weekday: 'long' }),
+        task.title,
+        task.description || '',
+        task.priority,
+        task.status,
+        new Date(task.created_at).toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'short', 
+          day: 'numeric' 
+        })
+      ]);
+
+      // Sort by dispenser name, then by day of week
+      csvData.sort((a, b) => {
+        const dispenserA = a[2];
+        const dispenserB = b[2];
+        if (dispenserA !== dispenserB) {
+          return dispenserA.localeCompare(dispenserB);
+        }
+        
+        const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const dayA = a[4];
+        const dayB = b[4];
+        return dayOrder.indexOf(dayA) - dayOrder.indexOf(dayB);
+      });
+
+      // Add a summary row at the top
+      const summaryRow = [
+        `Week ${selectedWeek} Weekly Tasks Only`,
+        selectedMonth,
+        `Total Weekly Tasks: ${data.length}`,
+        `Target: 42 (7 products × 6 dispensers)`,
+        '',
+        '',
+        '',
+        '',
+        '',
+        ''
+      ];
+
+      const csvContent = [headers, summaryRow, ...csvData].map(row => 
+        row.map(cell => `"${cell}"`).join(',')
+      ).join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `weekly-tasks-only-week-${selectedWeek}-${selectedMonth}-${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast({ 
+        title: 'Weekly Tasks Only Downloaded', 
+        description: `CSV file with ${data.length} weekly tasks for Week ${selectedWeek}` 
+      });
+      
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({
+        title: "Error",
+        description: message || "Failed to download weekly tasks",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Function to download complete weekly list (all tasks for current week)
+  const handleDownloadCompleteWeeklyList = async () => {
+    try {
+      setLoading(true);
+      
+      console.log('Starting download of complete weekly list...');
+      console.log('Current month:', selectedMonth, 'Current week:', selectedWeek);
+      
+      // First fetch all weekly tasks for the current week/month
+      await fetchAllWeeklyAssignments(selectedMonth, selectedWeek);
+      
+      // Wait a moment for the data to be set
+      setTimeout(() => {
+        console.log('Assigned products after fetch:', assignedProducts);
+        console.log('Assigned products length:', assignedProducts.length);
+        
+        if (assignedProducts.length === 0) {
+          toast({ title: 'No weekly tasks found', variant: 'destructive' });
+          return;
+        }
+
+        // Enhanced headers for complete weekly list
+        const headers = [
+          'Week', 
+          'Month', 
+          'Dispenser Name', 
+          'Dispenser Contact', 
+          'Day of Week', 
+          'Task Title', 
+          'Description', 
+          'Priority', 
+          'Status', 
+          'Created Date'
+        ];
+
+        // Create data for complete weekly list
+        const csvData = assignedProducts.map(task => [
+          selectedWeek,
+          selectedMonth,
+          task.assigned_user_name || 'Unknown',
+          task.assigned_user_phone || 'No phone',
+          new Date(task.date_field).toLocaleDateString('en-US', { weekday: 'long' }),
+          task.display_name,
+          task.description || '',
+          task.source_type === 'weekly_task' ? task.priority : task.risk_level,
+          task.status,
+          new Date(task.created_at).toLocaleDateString('en-US', { 
+            year: 'numeric', 
+            month: 'short', 
+            day: 'numeric' 
+          })
+        ]);
+
+        console.log('CSV data created:', csvData);
+
+        // Sort by dispenser name, then by day of week
+        csvData.sort((a, b) => {
+          const dispenserA = a[2];
+          const dispenserB = b[2];
+          if (dispenserA !== dispenserB) {
+            return dispenserA.localeCompare(dispenserB);
+          }
+          
+          const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+          const dayA = a[4];
+          const dayB = b[4];
+          return dayOrder.indexOf(dayA) - dayOrder.indexOf(dayB);
+        });
+
+        // Add a summary row at the top
+        const summaryRow = [
+          `Week ${selectedWeek} Complete Weekly List`,
+          selectedMonth,
+          `Total Weekly Tasks: ${assignedProducts.length}`,
+          `Target: 42 (7 products × 6 dispensers)`,
+          '',
+          '',
+          '',
+          '',
+          '',
+          ''
+        ];
+
+        const csvContent = [headers, summaryRow, ...csvData].map(row => 
+          row.map(cell => `"${cell}"`).join(',')
+        ).join('\n');
+
+        console.log('CSV content created, length:', csvContent.length);
+
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `complete-weekly-list-week-${selectedWeek}-${selectedMonth}-${new Date().toISOString().split('T')[0]}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+
+        toast({ 
+          title: 'Complete Weekly List Downloaded', 
+          description: `CSV file with ${assignedProducts.length} weekly tasks for Week ${selectedWeek}` 
+        });
+      }, 1000); // Increased timeout to 1 second
+      
+    } catch (error: unknown) {
+      console.error('Error in handleDownloadCompleteWeeklyList:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      toast({
+        title: "Error",
+        description: message || "Failed to download complete weekly list",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenAdjust = (item: UnifiedAssignment) => {
+    setAdjustItem({
+      id: item.id,
+      source_type: item.source_type,
+      display_name: item.display_name,
+      quantity: item.quantity || 0,
+      branch_id: item.branch_id || undefined,
+      assigned_to: item.assigned_to || undefined,
+      product_name: item.product_name || undefined,
+      branch: item.branch_name || undefined
+    })
     setAdjustQty(1)
     setAdjustDialogOpen(true)
   }
@@ -467,8 +1048,24 @@ const DispenserTasks = () => {
       setAdjustItem(null)
       setAdjustQty(1)
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      toast({ title: 'Error', description: message || 'Failed to adjust quantity', variant: 'destructive' })
+      // Better error message extraction
+      let errorMessage = "Failed to adjust quantity"
+      
+      if (error && typeof error === 'object') {
+        if ('message' in error && typeof error.message === 'string') {
+          errorMessage = error.message
+        } else if ('error' in error && typeof error.error === 'string') {
+          errorMessage = error.error
+        } else if ('details' in error && typeof error.details === 'string') {
+          errorMessage = error.details
+        } else if ('hint' in error && typeof error.hint === 'string') {
+          errorMessage = error.hint
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
+      toast({ title: 'Error', description: errorMessage, variant: 'destructive' })
     } finally {
       setAdjustLoading(false)
     }
@@ -672,10 +1269,26 @@ const DispenserTasks = () => {
               </SelectContent>
             </Select>
           </div>
-          <Button onClick={handleDownload} variant="outline" className="h-10 border-slate-700 text-slate-300 hover:bg-slate-800">
-            <Download className="h-4 w-4 mr-2" />
-            Export CSV
-          </Button>
+          {hasAdminAccess && (
+            <Button 
+              onClick={handleDownloadCompleteWeeklyList} 
+              variant="default" 
+              className="h-10 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download Complete Weekly List
+            </Button>
+          )}
+          {hasAdminAccess && (
+            <Button 
+              onClick={handleDownloadAllTasks} 
+              variant="outline" 
+              className="h-10 border-purple-600 text-purple-400 hover:bg-purple-600 hover:text-white"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download All Tasks
+            </Button>
+          )}
         </div>
 
         {/* Loading State */}

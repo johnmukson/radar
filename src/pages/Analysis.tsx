@@ -50,6 +50,7 @@ import {
   calculateExpiryTrends 
 } from '@/utils/expiryEfficiency'
 import { format } from 'date-fns'
+import { extractErrorMessage } from '@/lib/utils'
 
 interface AnalysisMetrics {
   totalValue: number
@@ -192,11 +193,11 @@ const Analysis = () => {
       console.log('Final branch names:', finalBranches?.map(b => b.name));
       setBranches(finalBranches || []);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error('Error loading branches:', message);
+      const errorMessage = extractErrorMessage(error, "Failed to load branches");
+      console.error('Error loading branches:', errorMessage);
       toast({
         title: "Error",
-        description: message || "Failed to load branches",
+        description: errorMessage,
         variant: "destructive",
       });
     }
@@ -367,11 +368,11 @@ const Analysis = () => {
       setMetrics(metrics)
       setBranchPerformance(Object.values(branchMetrics).filter(b => allowedBranches.includes(b.branchName)))
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('Error loading metrics:', message)
+      const errorMessage = extractErrorMessage(error, "Failed to load analysis metrics")
+      console.error('Error loading metrics:', errorMessage)
       toast({
         title: "Error",
-        description: message || "Failed to load analysis metrics",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {

@@ -84,10 +84,26 @@ const StockAdjustmentDialog = ({ stockItems, onStockUpdated }: StockAdjustmentDi
       setAdjustmentReason('')
       onStockUpdated()
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      // Better error message extraction
+      let errorMessage = "Failed to adjust quantity"
+      
+      if (error && typeof error === 'object') {
+        if ('message' in error && typeof error.message === 'string') {
+          errorMessage = error.message
+        } else if ('error' in error && typeof error.error === 'string') {
+          errorMessage = error.error
+        } else if ('details' in error && typeof error.details === 'string') {
+          errorMessage = error.details
+        } else if ('hint' in error && typeof error.hint === 'string') {
+          errorMessage = error.hint
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
       toast({
         title: "Error",
-        description: message || "Failed to adjust quantity",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {

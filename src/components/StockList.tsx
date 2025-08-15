@@ -74,10 +74,26 @@ const StockList = () => {
 
       setStockItems(data || [])
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      // Better error message extraction
+      let errorMessage = "Failed to fetch stock items"
+      
+      if (error && typeof error === 'object') {
+        if ('message' in error && typeof error.message === 'string') {
+          errorMessage = error.message
+        } else if ('error' in error && typeof error.error === 'string') {
+          errorMessage = error.error
+        } else if ('details' in error && typeof error.details === 'string') {
+          errorMessage = error.details
+        } else if ('hint' in error && typeof error.hint === 'string') {
+          errorMessage = error.hint
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
       toast({
         title: "Error",
-        description: message || "Failed to fetch stock items",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -136,10 +152,26 @@ const StockList = () => {
         description: "Stock item deleted successfully",
       })
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      // Better error message extraction
+      let errorMessage = "Failed to delete stock item"
+      
+      if (error && typeof error === 'object') {
+        if ('message' in error && typeof error.message === 'string') {
+          errorMessage = error.message
+        } else if ('error' in error && typeof error.error === 'string') {
+          errorMessage = error.error
+        } else if ('details' in error && typeof error.details === 'string') {
+          errorMessage = error.details
+        } else if ('hint' in error && typeof error.hint === 'string') {
+          errorMessage = error.hint
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
       toast({
         title: "Error",
-        description: message || "Failed to delete stock item",
+        description: errorMessage,
         variant: "destructive",
       })
     }
@@ -242,8 +274,24 @@ const StockList = () => {
       setStockItems(prev => prev.map(item => item.id === adjustItem.id ? { ...item, quantity: newQty } : item))
       toast({ title: 'Success', description: 'Stock adjusted.' })
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      toast({ title: 'Error', description: message || 'Failed to adjust stock', variant: 'destructive' })
+      // Better error message extraction
+      let errorMessage = "Failed to adjust stock"
+      
+      if (error && typeof error === 'object') {
+        if ('message' in error && typeof error.message === 'string') {
+          errorMessage = error.message
+        } else if ('error' in error && typeof error.error === 'string') {
+          errorMessage = error.error
+        } else if ('details' in error && typeof error.details === 'string') {
+          errorMessage = error.details
+        } else if ('hint' in error && typeof error.hint === 'string') {
+          errorMessage = error.hint
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
+      toast({ title: 'Error', description: errorMessage, variant: 'destructive' })
     } finally {
       setAdjustLoading(false)
     }

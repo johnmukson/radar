@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUserRole } from '@/hooks/useUserRole'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,6 +21,7 @@ import { supabase } from '@/integrations/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { format, isAfter, endOfMonth, parseISO } from 'date-fns'
 import { isExpired } from '@/utils/expiryUtils'
+import { extractErrorMessage } from '@/lib/utils'
 
 const RISK_PRIORITY = ['critical', 'high', 'medium', 'low']
 
@@ -89,8 +90,8 @@ const Assignments = () => {
       if (dispError) throw dispError
       setDispensers((disp || []).map(d => ({ id: d.user_id, dispenser: d.name, role: 'dispenser' })))
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      toast({ title: 'Error', description: message || 'Failed to fetch data', variant: 'destructive' })
+      const errorMessage = extractErrorMessage(error, 'Failed to fetch data')
+      toast({ title: 'Error', description: errorMessage, variant: 'destructive' })
     } finally {
       setLoading(false)
     }
@@ -119,10 +120,10 @@ const Assignments = () => {
       // Refresh data
       fetchData()
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
+      const errorMessage = extractErrorMessage(error, 'Failed to delete stock items')
       toast({ 
         title: 'Error', 
-        description: message || 'Failed to delete stock items', 
+        description: errorMessage, 
         variant: 'destructive' 
       })
     } finally {
@@ -192,8 +193,8 @@ const Assignments = () => {
       if (error) throw error
       toast({ title: 'Assignments Saved', description: `${inserts.length} assignments saved to weekly_tasks` })
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      toast({ title: 'Error', description: message || 'Failed to save assignments', variant: 'destructive' })
+      const errorMessage = extractErrorMessage(error, 'Failed to save assignments')
+      toast({ title: 'Error', description: errorMessage, variant: 'destructive' })
     } finally {
       setAssigning(false)
     }

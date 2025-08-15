@@ -66,11 +66,27 @@ const LedgerBoard = () => {
       if (error) throw error
       setMovements(data || [])
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('Error loading movements:', message)
+      // Better error message extraction
+      let errorMessage = "Failed to load stock movements"
+      
+      if (error && typeof error === 'object') {
+        if ('message' in error && typeof error.message === 'string') {
+          errorMessage = error.message
+        } else if ('error' in error && typeof error.error === 'string') {
+          errorMessage = error.error
+        } else if ('details' in error && typeof error.details === 'string') {
+          errorMessage = error.details
+        } else if ('hint' in error && typeof error.hint === 'string') {
+          errorMessage = error.hint
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
+      console.error('Error loading movements:', errorMessage)
       toast({
         title: "Error",
-        description: "Failed to load stock movements",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
@@ -83,7 +99,7 @@ const LedgerBoard = () => {
     try {
       // Get date range based on selected period
       const now = new Date()
-      let startDate = new Date()
+      const startDate = new Date()
       switch (selectedPeriod) {
         case 'week':
           startDate.setDate(now.getDate() - 7)
@@ -165,7 +181,7 @@ const LedgerBoard = () => {
 
         const sortedDates = Array.from(activityDates).sort().reverse()
         let streakDays = 0
-        let currentDate = new Date()
+        const currentDate = new Date()
         for (let i = 0; i < sortedDates.length; i++) {
           const activityDate = new Date(sortedDates[i] as string)
           const diffDays = Math.floor((currentDate.getTime() - activityDate.getTime()) / (1000 * 60 * 60 * 24))
@@ -210,11 +226,27 @@ const LedgerBoard = () => {
 
       setDispenserPerformance(performanceData)
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('Error loading performance data:', message)
+      // Better error message extraction
+      let errorMessage = "Failed to load dispenser performance data"
+      
+      if (error && typeof error === 'object') {
+        if ('message' in error && typeof error.message === 'string') {
+          errorMessage = error.message
+        } else if ('error' in error && typeof error.error === 'string') {
+          errorMessage = error.error
+        } else if ('details' in error && typeof error.details === 'string') {
+          errorMessage = error.details
+        } else if ('hint' in error && typeof error.hint === 'string') {
+          errorMessage = error.hint
+        }
+      } else if (typeof error === 'string') {
+        errorMessage = error
+      }
+      
+      console.error('Error loading performance data:', errorMessage)
       toast({
         title: "Error",
-        description: "Failed to load dispenser performance data",
+        description: errorMessage,
         variant: "destructive",
       })
     } finally {
