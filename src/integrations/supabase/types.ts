@@ -580,6 +580,121 @@ export type Database = {
           }
         ]
       }
+      dormant_stock: {
+        Row: {
+          id: string
+          product_id: number
+          product_name: string
+          excess_value: number
+          excess_qty: number
+          sales: number
+          days: number
+          classification: string
+          branch_id: string | null
+          uploaded_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          product_id: number
+          product_name: string
+          excess_value: number
+          excess_qty: number
+          sales?: number
+          days: number
+          classification: string
+          branch_id?: string | null
+          uploaded_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          product_id?: number
+          product_name?: string
+          excess_value?: number
+          excess_qty?: number
+          sales?: number
+          days?: number
+          classification?: string
+          branch_id?: string | null
+          uploaded_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dormant_stock_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dormant_stock_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      notes: {
+        Row: {
+          id: string
+          content: string
+          created_by: string | null
+          parent_id: string | null
+          is_public: boolean
+          recipient_id: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          content: string
+          created_by?: string | null
+          parent_id?: string | null
+          is_public?: boolean
+          recipient_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          content?: string
+          created_by?: string | null
+          parent_id?: string | null
+          is_public?: boolean
+          recipient_id?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notes_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_parent_id_fkey"
+            columns: ["parent_id"]
+            isOneToOne: false
+            referencedRelation: "notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       dispensers_view: {

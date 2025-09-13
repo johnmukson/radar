@@ -315,6 +315,153 @@ const DispenserTasks = () => {
     }
   }, [hasAdminAccess, user, selectedMonth, selectedWeek, fetchAllWeeklyAssignments, toast]);
 
+  // Function to ensure each dispenser has exactly 7 products for the week
+  const ensureWeeklyProductStructure = useCallback(async () => {
+    if (!hasAdminAccess) {
+      toast({ title: 'Access Denied', description: 'Only admins can create weekly product structure', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      // Define exactly 7 products for the week (like in your Excel example)
+      const weeklyProducts = [
+        'NEC',
+        'SEN', 
+        'MO',
+        'NUC',
+        'RISF',
+        'IRBI',
+        'CAR'
+      ];
+
+      // Clear existing weekly tasks for this week to start fresh
+      const currentWeekStart = new Date();
+      currentWeekStart.setDate(currentWeekStart.getDate() - currentWeekStart.getDay()); // Start of week (Sunday)
+      
+      const { error: deleteError } = await supabase
+        .from('weekly_tasks')
+        .delete()
+        .gte('created_at', currentWeekStart.toISOString());
+
+      if (deleteError) throw deleteError;
+
+      // Get all dispensers
+      const { data: dispensers, error: dispensersError } = await supabase
+        .from('users')
+        .select('id, name, email')
+        .eq('role', 'dispenser');
+
+      if (dispensersError) throw dispensersError;
+
+      // Debug: Log what we found
+      console.log('Found dispensers:', dispensers);
+      console.log('Number of dispensers:', dispensers?.length || 0);
+
+      // Create exactly 7 tasks for each dispenser (7 × 6 = 42 total)
+      const tasksToCreate = [];
+
+      // If no dispensers found in users table, try user_roles table
+      if (!dispensers || dispensers.length === 0) {
+        console.log('No dispensers found in users table, checking user_roles table...');
+        
+        const { data: userRoles, error: userRolesError } = await supabase
+          .from('user_roles')
+          .select(`
+            user_id,
+            users!inner(id, name, email)
+          `)
+          .eq('role', 'dispenser');
+
+        if (userRolesError) throw userRolesError;
+        
+        console.log('Found dispensers in user_roles:', userRoles);
+        
+        if (userRoles && userRoles.length > 0) {
+          // Transform the data to match expected format
+          const transformedDispensers = userRoles.map(ur => ({
+            id: ur.users.id,
+            name: ur.users.name,
+            email: ur.users.email
+          }));
+          
+          console.log('Transformed dispensers:', transformedDispensers);
+          
+          // Use transformed dispensers
+          for (const dispenser of transformedDispensers) {
+            // Each dispenser gets exactly 7 products for the week
+            for (let i = 0; i < 7; i++) {
+              const product = weeklyProducts[i];
+              const priority = i < 2 ? 'high' : i < 4 ? 'medium' : 'low';
+              
+              tasksToCreate.push({
+                title: `Move ${product}`,
+                description: `Move ${product} (Priority: ${priority}, Week: ${selectedWeek}, Month: ${selectedMonth})`,
+                assigned_to: dispenser.id,
+                assigned_by: user?.id,
+                priority: priority,
+                status: 'pending',
+                whatsapp_sent: false,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              });
+            }
+          }
+        } else {
+          throw new Error('No dispensers found in either users table or user_roles table');
+        }
+      } else {
+        // Use dispensers from users table
+        for (const dispenser of dispensers) {
+          // Each dispenser gets exactly 7 products for the week
+          for (let i = 0; i < 7; i++) {
+            const product = weeklyProducts[i];
+            const priority = i < 2 ? 'high' : i < 4 ? 'medium' : 'low';
+            
+            tasksToCreate.push({
+              title: `Move ${product}`,
+              description: `Move ${product} (Priority: ${priority}, Week: ${selectedWeek}, Month: ${selectedMonth})`,
+              assigned_to: dispenser.id,
+              assigned_by: user?.id,
+              priority: priority,
+              status: 'pending',
+              whatsapp_sent: false,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+          }
+        }
+      }
+
+      // Insert exactly 42 tasks (7 products × 6 dispensers)
+      const { error: insertError } = await supabase
+        .from('weekly_tasks')
+        .insert(tasksToCreate);
+
+      if (insertError) throw insertError;
+
+      toast({ 
+        title: 'Weekly Product Structure Created!', 
+        description: `Created exactly ${tasksToCreate.length} tasks: 7 products × ${tasksToCreate.length / 7} dispensers = Perfect weekly structure!` 
+      });
+
+      // Refresh the data
+      await fetchAllWeeklyAssignments(selectedMonth, selectedWeek);
+
+    } catch (error: unknown) {
+      console.error('Error in ensureWeeklyProductStructure:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      toast({
+        title: "Error",
+        description: message || "Failed to create weekly product structure",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [hasAdminAccess, selectedWeek, selectedMonth, user?.id, toast, fetchAllWeeklyAssignments]);
+
   // Load dispensers
   useEffect(() => {
     const loadInitialData = async () => {
@@ -480,211 +627,6 @@ const DispenserTasks = () => {
     }
   }
 
-  const handleDownload = () => {
-    if (assignedProducts.length === 0) {
-      toast({ title: 'No assignments to download', variant: 'destructive' });
-      return;
-    }
-
-    // Enhanced headers for comprehensive weekly assignment list
-    const headers = [
-      'Week', 
-      'Month', 
-      'Dispenser Name', 
-      'Dispenser Email', 
-      'Day of Week', 
-      'Task/Product Title', 
-      'Description', 
-      'Priority/Risk Level', 
-      'Status', 
-      'Due Date', 
-      'Quantity', 
-      'Unit Price', 
-      'Branch', 
-      'Created Date'
-    ];
-
-    // Create comprehensive weekly assignment list
-    const csvData = assignedProducts.map(task => [
-      selectedWeek, // Week number
-      selectedMonth, // Month
-      task.assigned_user_name || 'Unknown', // Dispenser name
-      task.assigned_user_phone || 'No phone', // Dispenser contact
-      new Date(task.date_field).toLocaleDateString('en-US', { weekday: 'long' }), // Day of week
-      task.display_name, // Task/Product title
-      task.description || '', // Description
-      task.source_type === 'weekly_task' ? task.priority : task.risk_level, // Priority/Risk
-      task.status, // Status
-      task.date_field, // Due date
-      task.quantity || '', // Quantity
-      task.unit_price || '', // Unit price
-      task.branch_name || 'Main Branch', // Branch
-      new Date(task.created_at).toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric' 
-      }) // Created date
-    ]);
-
-    // Sort by dispenser name, then by day of week for better organization
-    csvData.sort((a, b) => {
-      // First sort by dispenser name
-      const dispenserA = a[2];
-      const dispenserB = b[2];
-      if (dispenserA !== dispenserB) {
-        return dispenserA.localeCompare(dispenserB);
-      }
-      
-      // Then sort by day of week
-      const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-      const dayA = a[4];
-      const dayB = b[4];
-      return dayOrder.indexOf(dayA) - dayOrder.indexOf(dayB);
-    });
-
-    // Add a summary row at the top
-    const summaryRow = [
-      `Week ${selectedWeek} Summary`,
-      selectedMonth,
-      `Total Assignments: ${assignedProducts.length}`,
-      `Expected: 42 (7 products × 6 dispensers)`,
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      '',
-      ''
-    ];
-
-    const csvContent = [headers, summaryRow, ...csvData].map(row => 
-      row.map(cell => `"${cell}"`).join(',')
-    ).join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `weekly-assignments-week-${selectedWeek}-${selectedMonth}-${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-
-    toast({ 
-      title: 'Weekly Assignment List Downloaded', 
-      description: `CSV file with ${assignedProducts.length} assignments for Week ${selectedWeek} is ready to share with dispensers` 
-    });
-  };
-
-  // New function to download ALL tasks (not just weekly)
-  const handleDownloadAllTasks = async () => {
-    try {
-      setLoading(true);
-      
-      // Fetch ALL tasks from the system
-      const { data, error } = await supabase
-        .from('weekly_tasks')
-        .select(`
-          *,
-          assigned_user:users!assigned_to(id, name, phone),
-          assigned_by_user:users!assigned_by(id, name)
-        `)
-        .order('created_at', { ascending: true });
-
-      if (error) throw error;
-
-      if (!data || data.length === 0) {
-        toast({ title: 'No tasks found', variant: 'destructive' });
-        return;
-      }
-
-      // Enhanced headers for all tasks
-      const headers = [
-        'Task ID',
-        'Task Title', 
-        'Description', 
-        'Assigned To', 
-        'Assigned By', 
-        'Priority', 
-        'Status', 
-        'Due Date', 
-        'WhatsApp Sent', 
-        'Created Date', 
-        'Updated Date'
-      ];
-
-      // Create data for all tasks
-      const csvData = data.map(task => [
-        task.id,
-        task.title,
-        task.description || '',
-        task.assigned_user?.name || 'Unknown',
-        task.assigned_by_user?.name || 'Unknown',
-        task.priority,
-        task.status,
-        task.due_date || 'No due date',
-        task.whatsapp_sent ? 'Yes' : 'No',
-        new Date(task.created_at).toLocaleDateString('en-US', { 
-          year: 'numeric', 
-          month: 'short', 
-          day: 'numeric' 
-        }),
-        new Date(task.updated_at).toLocaleDateString('en-US', { 
-          year: 'numeric', 
-          month: 'short', 
-          day: 'numeric' 
-        })
-      ]);
-
-      // Sort by created date (newest first)
-      csvData.sort((a, b) => new Date(b[10]).getTime() - new Date(a[10]).getTime());
-
-      // Add a summary row at the top
-      const summaryRow = [
-        `All Tasks Summary`,
-        `Total Tasks: ${data.length}`,
-        `Date Range: ${new Date(data[data.length - 1]?.created_at).toLocaleDateString()} - ${new Date(data[0]?.created_at).toLocaleDateString()}`,
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        ''
-      ];
-
-      const csvContent = [headers, summaryRow, ...csvData].map(row => 
-        row.map(cell => `"${cell}"`).join(',')
-      ).join('\n');
-
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `all-tasks-${new Date().toISOString().split('T')[0]}.csv`;
-      link.click();
-      URL.revokeObjectURL(url);
-
-      toast({ 
-        title: 'All Tasks Downloaded', 
-        description: `CSV file with ${data.length} total tasks from the system` 
-      });
-      
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      toast({
-        title: "Error",
-        description: message || "Failed to download all tasks",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // New function to download ONLY weekly tasks (42 per week)
   const handleDownloadWeeklyTasksOnly = async () => {
     try {
@@ -797,121 +739,279 @@ const DispenserTasks = () => {
     }
   };
 
-  // Function to download complete weekly list (all tasks for current week)
-  const handleDownloadCompleteWeeklyList = async () => {
+  // Function to download all dispenser tasks with exactly 7 per dispenser
+  const handleDownload7ProductsPerWeek = useCallback(async () => {
+    if (!hasAdminAccess) {
+      toast({ title: 'Access Denied', description: 'You need admin access to download all dispenser tasks', variant: 'destructive' });
+      return;
+    }
+
     try {
       setLoading(true);
-      
-      console.log('Starting download of complete weekly list...');
-      console.log('Current month:', selectedMonth, 'Current week:', selectedWeek);
-      
-      // First fetch all weekly tasks for the current week/month
-      await fetchAllWeeklyAssignments(selectedMonth, selectedWeek);
-      
-      // Wait a moment for the data to be set
-      setTimeout(() => {
-        console.log('Assigned products after fetch:', assignedProducts);
-        console.log('Assigned products length:', assignedProducts.length);
+
+      // Fetch all tasks with user information
+      const { data: tasks, error } = await supabase
+        .from('weekly_tasks')
+        .select(`
+          *,
+          assigned_user:users!assigned_to(id, name, phone),
+          assigned_by_user:users!assigned_by(id, name)
+        `);
+
+      if (error) throw error;
+
+      // Get stock items to match with tasks for quantities and expiry dates
+      const { data: stockItems, error: stockError } = await supabase
+        .from('stock_items')
+        .select('id, product_name, quantity, expiry_date');
+
+      if (stockError) throw stockError;
+
+      // Create maps for efficient product name matching
+      const quantityMap = new Map<string, number>();
+      const expiryMap = new Map<string, string>();
+
+      stockItems?.forEach(item => {
+        quantityMap.set(item.product_name.toLowerCase(), item.quantity);
+        expiryMap.set(item.product_name.toLowerCase(), item.expiry_date);
+      });
+
+      // Helper function to extract quantity and expiry from task title/description
+      const getQuantityFromTask = (task: any, quantityMap: Map<string, number>, expiryMap: Map<string, string>) => {
+        const searchText = (task.title + ' ' + (task.description || '')).toLowerCase();
         
-        if (assignedProducts.length === 0) {
-          toast({ title: 'No weekly tasks found', variant: 'destructive' });
-          return;
-        }
-
-        // Enhanced headers for complete weekly list
-        const headers = [
-          'Week', 
-          'Month', 
-          'Dispenser Name', 
-          'Dispenser Contact', 
-          'Day of Week', 
-          'Task Title', 
-          'Description', 
-          'Priority', 
-          'Status', 
-          'Created Date'
-        ];
-
-        // Create data for complete weekly list
-        const csvData = assignedProducts.map(task => [
-          selectedWeek,
-          selectedMonth,
-          task.assigned_user_name || 'Unknown',
-          task.assigned_user_phone || 'No phone',
-          new Date(task.date_field).toLocaleDateString('en-US', { weekday: 'long' }),
-          task.display_name,
-          task.description || '',
-          task.source_type === 'weekly_task' ? task.priority : task.risk_level,
-          task.status,
-          new Date(task.created_at).toLocaleDateString('en-US', { 
-            year: 'numeric', 
-            month: 'short', 
-            day: 'numeric' 
-          })
-        ]);
-
-        console.log('CSV data created:', csvData);
-
-        // Sort by dispenser name, then by day of week
-        csvData.sort((a, b) => {
-          const dispenserA = a[2];
-          const dispenserB = b[2];
-          if (dispenserA !== dispenserB) {
-            return dispenserA.localeCompare(dispenserB);
+        // Look for exact product name matches
+        for (const [productName, quantity] of quantityMap.entries()) {
+          if (searchText.includes(productName)) {
+            const expiry = expiryMap.get(productName);
+            return {
+              quantity: quantity.toString(),
+              expiry: expiry ? format(new Date(expiry), 'yyyy-MM-dd') : ''
+            };
           }
-          
-          const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-          const dayA = a[4];
-          const dayB = b[4];
-          return dayOrder.indexOf(dayA) - dayOrder.indexOf(dayB);
-        });
+        }
+        
+        // If no match found, return default
+        return {
+          quantity: '1',
+          expiry: ''
+        };
+      };
 
-        // Add a summary row at the top
-        const summaryRow = [
-          `Week ${selectedWeek} Complete Weekly List`,
-          selectedMonth,
-          `Total Weekly Tasks: ${assignedProducts.length}`,
-          `Target: 42 (7 products × 6 dispensers)`,
-          '',
-          '',
-          '',
-          '',
-          '',
-          ''
-        ];
+      // Group tasks by dispenser and limit to 7 per dispenser
+      const dispenserTasks: { [key: string]: any[] } = {};
 
-        const csvContent = [headers, summaryRow, ...csvData].map(row => 
-          row.map(cell => `"${cell}"`).join(',')
-        ).join('\n');
+      tasks?.forEach((task: any) => {
+        const dispenserName = task.assigned_user?.name || 'Unknown';
+        if (!dispenserTasks[dispenserName]) {
+          dispenserTasks[dispenserName] = [];
+        }
+        // Only add if we haven't reached 7 tasks for this dispenser
+        if (dispenserTasks[dispenserName].length < 7) {
+          // Add quantity and expiry information to the task
+          const taskWithQuantity = {
+            ...task,
+            ...getQuantityFromTask(task, quantityMap, expiryMap)
+          };
+          dispenserTasks[dispenserName].push(taskWithQuantity);
+        }
+      });
 
-        console.log('CSV content created, length:', csvContent.length);
+      // Prepare CSV data
+      const headers = [
+        'Title',
+        'Description',
+        'Quantity',
+        'Expiry Date',
+        'Created At'
+      ];
 
-        const blob = new Blob([csvContent], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `complete-weekly-list-week-${selectedWeek}-${selectedMonth}-${new Date().toISOString().split('T')[0]}.csv`;
-        link.click();
-        URL.revokeObjectURL(url);
+      // Create CSV data with exactly 7 tasks per dispenser
+      const csvData = [];
+      const sortedDispensers = Object.keys(dispenserTasks).sort();
 
-        toast({ 
-          title: 'Complete Weekly List Downloaded', 
-          description: `CSV file with ${assignedProducts.length} weekly tasks for Week ${selectedWeek}` 
-        });
-      }, 1000); // Increased timeout to 1 second
-      
-    } catch (error: unknown) {
-      console.error('Error in handleDownloadCompleteWeeklyList:', error);
-      const message = error instanceof Error ? error.message : String(error);
-      toast({
-        title: "Error",
-        description: message || "Failed to download complete weekly list",
-        variant: "destructive",
+      sortedDispensers.forEach(dispenserName => {
+        // Add dispenser header
+        csvData.push(['', `=== ${dispenserName} ===`, '', '', '']);
+        
+        // Add exactly 7 tasks for this dispenser (pad with empty rows if needed)
+        const dispenserTaskList = dispenserTasks[dispenserName];
+        for (let i = 0; i < 7; i++) {
+          if (i < dispenserTaskList.length) {
+            const task = dispenserTaskList[i];
+            csvData.push([
+              task.title,
+              task.description || '',
+              task.quantity || '1', // Actual quantity from stock_items
+              task.expiry || '', // Expiry date from stock_items
+              format(new Date(task.created_at), 'yyyy-MM-dd HH:mm')
+            ]);
+          } else {
+            // Add empty row to maintain 7 rows per dispenser
+            csvData.push(['', '', '', '', '']);
+          }
+        }
+        
+        // Add empty row after dispenser's tasks
+        csvData.push(['', '', '', '', '']);
+      });
+
+      // Create and download CSV
+      const csvContent = [headers, ...csvData].map(row => 
+        row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+      ).join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `all-dispenser-tasks-7-per-dispenser.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      // Success message
+      const totalTasks = Object.values(dispenserTasks).reduce((sum, tasks) => sum + tasks.length, 0);
+      toast({ 
+        title: 'Download Successful', 
+        description: `Downloaded ${totalTasks} tasks for ${sortedDispensers.length} dispensers (7 per dispenser)` 
+      });
+
+    } catch (error: any) {
+      console.error('Download error:', error);
+      toast({ 
+        title: 'Download Failed', 
+        description: error?.message || error?.toString() || 'Failed to download tasks', 
+        variant: 'destructive' 
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, [hasAdminAccess, toast]);
+
+  // Function to download all assignments for a specific dispenser
+  const handleDownloadDispenserAssignments = useCallback(async (dispenserId?: string) => {
+    if (!hasAdminAccess) {
+      toast({ title: 'Access Denied', description: 'You need admin access to download dispenser assignments', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      // Get the dispenser to download (either selected or all)
+      let targetDispenserId = dispenserId;
+      if (!targetDispenserId && selectedDispenser) {
+        targetDispenserId = selectedDispenser;
+      }
+
+      // Fetch all tasks for the specific dispenser
+      const { data: tasks, error } = await supabase
+        .from('weekly_tasks')
+        .select(`
+          *,
+          assigned_user:users!assigned_to(id, name, phone),
+          assigned_by_user:users!assigned_by(id, name)
+        `)
+        .eq('assigned_to', targetDispenserId || '')
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      if (!tasks || tasks.length === 0) {
+        toast({ title: 'No tasks found', description: 'This dispenser has no assignments', variant: 'destructive' });
+        return;
+      }
+
+      // Get stock items for quantities and expiry dates
+      const { data: stockItems, error: stockError } = await supabase
+        .from('stock_items')
+        .select('id, product_name, quantity, expiry_date');
+
+      if (stockError) throw stockError;
+
+      // Create maps for product matching
+      const quantityMap = new Map<string, number>();
+      const expiryMap = new Map<string, string>();
+
+      stockItems?.forEach(item => {
+        quantityMap.set(item.product_name.toLowerCase(), item.quantity);
+        expiryMap.set(item.product_name.toLowerCase(), item.expiry_date);
+      });
+
+      // Helper function to get quantity and expiry
+      const getQuantityFromTask = (task: any) => {
+        const searchText = (task.title + ' ' + (task.description || '')).toLowerCase();
+        
+        for (const [productName, quantity] of quantityMap.entries()) {
+          if (searchText.includes(productName)) {
+            const expiry = expiryMap.get(productName);
+            return {
+              quantity: quantity.toString(),
+              expiry: expiry ? format(new Date(expiry), 'yyyy-MM-dd') : ''
+            };
+          }
+        }
+        
+        return { quantity: '1', expiry: '' };
+      };
+
+      // Prepare CSV data
+      const headers = ['Title', 'Description', 'Quantity', 'Expiry Date', 'Priority', 'Status', 'Created At'];
+      const csvData = [];
+
+      // Add dispenser header
+      const dispenserName = tasks[0]?.assigned_user?.name || 'Unknown';
+      csvData.push(['', `=== ${dispenserName} - All Assignments ===`, '', '', '', '', '']);
+
+      // Add all tasks for this dispenser
+      tasks.forEach(task => {
+        const { quantity, expiry } = getQuantityFromTask(task);
+        csvData.push([
+          task.title,
+          task.description || '',
+          quantity,
+          expiry,
+          task.priority,
+          task.status,
+          format(new Date(task.created_at), 'yyyy-MM-dd HH:mm')
+        ]);
+      });
+
+      // Add summary
+      csvData.push(['', '', '', '', '', '', '']);
+      csvData.push(['', `Total Assignments: ${tasks.length}`, '', '', '', '', '']);
+      csvData.push(['', `Dispenser: ${dispenserName}`, '', '', '', '', '']);
+      csvData.push(['', `Downloaded: ${new Date().toLocaleDateString()}`, '', '', '', '', '']);
+
+      // Create and download CSV
+      const csvContent = [headers, ...csvData].map(row => 
+        row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+      ).join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${dispenserName}-all-assignments.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast({ 
+        title: 'Dispenser Assignments Downloaded', 
+        description: `Downloaded ${tasks.length} tasks for ${dispenserName}` 
+      });
+
+    } catch (error: any) {
+      console.error('Download error:', error);
+      toast({ 
+        title: 'Download Failed', 
+        description: error?.message || error?.toString() || 'Failed to download dispenser assignments', 
+        variant: 'destructive' 
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [hasAdminAccess, selectedDispenser, toast]);
 
   const handleOpenAdjust = (item: UnifiedAssignment) => {
     setAdjustItem({
@@ -1271,22 +1371,22 @@ const DispenserTasks = () => {
           </div>
           {hasAdminAccess && (
             <Button 
-              onClick={handleDownloadCompleteWeeklyList} 
-              variant="default" 
-              className="h-10 bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={handleDownload7ProductsPerWeek} 
+              variant="outline" 
+              className="h-10 border-teal-600 text-teal-400 hover:bg-teal-600 hover:text-white"
             >
               <Download className="h-4 w-4 mr-2" />
-              Download Complete Weekly List
+              Download 7 Products Per Week
             </Button>
           )}
           {hasAdminAccess && (
             <Button 
-              onClick={handleDownloadAllTasks} 
+              onClick={() => handleDownloadDispenserAssignments(selectedDispenser)} 
               variant="outline" 
               className="h-10 border-purple-600 text-purple-400 hover:bg-purple-600 hover:text-white"
             >
               <Download className="h-4 w-4 mr-2" />
-              Download All Tasks
+              Download Selected Dispenser Assignments
             </Button>
           )}
         </div>
@@ -1296,6 +1396,46 @@ const DispenserTasks = () => {
           <div className="flex justify-center items-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
           </div>
+        )}
+
+        {/* Dispenser Product Count Summary */}
+        {!loading && assignedProducts.length > 0 && showAllTasks && (
+          <Card className="bg-slate-800 border-slate-700 mb-4">
+            <CardContent className="p-4">
+              <h3 className="text-lg font-semibold text-white mb-3">📊 Weekly Product Distribution</h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {(() => {
+                  const groupedByDispenser = assignedProducts.reduce((groups, task) => {
+                    const dispenserName = task.assigned_user_name || 'Unknown';
+                    if (!groups[dispenserName]) {
+                      groups[dispenserName] = [];
+                    }
+                    groups[dispenserName].push(task);
+                    return groups;
+                  }, {} as Record<string, typeof assignedProducts>);
+
+                  return Object.entries(groupedByDispenser).map(([dispenserName, tasks]) => {
+                    const productCount = tasks.length;
+                    const isComplete = productCount === 7;
+                    return (
+                      <div key={dispenserName} className="text-center p-3 rounded-lg border">
+                        <div className={`text-2xl font-bold ${isComplete ? 'text-green-400' : 'text-orange-400'}`}>
+                          {productCount}/7
+                        </div>
+                        <div className="text-sm text-slate-300">{dispenserName}</div>
+                        <div className={`text-xs ${isComplete ? 'text-green-400' : 'text-orange-400'}`}>
+                          {isComplete ? '✅ Complete' : '❌ Incomplete'}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              <div className="mt-3 text-sm text-slate-400 text-center">
+                Target: 42 total products (7 per dispenser × 6 dispensers)
+              </div>
+            </CardContent>
+          </Card>
         )}
 
                           {/* Display Logic */}

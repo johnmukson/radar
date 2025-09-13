@@ -26,7 +26,8 @@ import {
   BookOpen,
   Package,
   BarChart2,
-  LogOut
+  LogOut,
+  Archive
 } from 'lucide-react'
 import { useUserRole } from '@/hooks/useUserRole'
 import { useSidebar } from '@/components/ui/sidebar'
@@ -93,6 +94,12 @@ const menuItems = [
     url: "/analysis",
     icon: BarChart2,
     roles: ['admin', 'system_admin', 'regional_manager', 'branch_system_admin'],
+  },
+  {
+    title: "Dormant Stock",
+    url: "/dormant-stock",
+    icon: Archive,
+    roles: ['admin', 'system_admin'],
   },
 ]
 

@@ -22,8 +22,10 @@ import NotFound from "./pages/NotFound";
 import StockUpload from "./components/StockUpload";
 import { ThemeProvider } from "next-themes";
 import Analysis from '@/pages/Analysis'
+import DormantStock from '@/pages/DormantStock'
 import { StockAdjusterProvider } from '@/contexts/StockAdjusterContext'
 import UpdatePassword from "./pages/UpdatePassword";
+import FloatingNotesButton from '@/components/FloatingNotesButtonHybrid';
 
 const queryClient = new QueryClient();
 
@@ -125,10 +127,19 @@ const App = () => (
                       </SidebarInset>
                     </SidebarProvider>
                   } />
+                  <Route path="/dormant-stock" element={
+                    <SidebarProvider>
+                      <AppSidebar />
+                      <SidebarInset className="flex-1">
+                        <DormantStock />
+                      </SidebarInset>
+                    </SidebarProvider>
+                  } />
                   
                   {/* 404 catch-all route */}
                   <Route path="*" element={<NotFound />} />
                 </Routes>
+                <FloatingNotesButton />
               </div>
             </BrowserRouter>
           </StockAdjusterProvider>
