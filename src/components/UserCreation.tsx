@@ -122,7 +122,7 @@ const UserCreation = () => {
 
       toast({
         title: "Success",
-        description: "User account created successfully! A confirmation email has been sent. The user must confirm their email before they can log in.",
+        description: "User account created successfully! A confirmation email has been sent. The user must confirm their email within 24 hours before they can log in.",
       })
       
       // Clear form

@@ -27,17 +27,28 @@ export default function AuthPage() {
     setError('')
     setShowEmailConfirmation(false)
     
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) {
-      if (error.message.includes('Email not confirmed')) {
-        setShowEmailConfirmation(true)
-        setError('Please check your email and click the confirmation link before signing in.')
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      
+      if (error) {
+        
+        if (error.message.includes('Email not confirmed')) {
+          setShowEmailConfirmation(true)
+          setError('Please check your email and click the confirmation link before signing in. The link is valid for 24 hours.')
+        } else if (error.message.includes('Invalid login credentials')) {
+          setError('Invalid email or password. Please check your credentials.')
+        } else if (error.message.includes('Too many requests')) {
+          setError('Too many login attempts. Please wait a moment and try again.')
+        } else {
+          setError(`Sign in failed: ${error.message}`)
+        }
       } else {
-        setError(error.message)
+        window.location.href = '/dashboard'
       }
-    } else {
-      window.location.href = '/dashboard'
+    } catch (err) {
+      setError('An unexpected error occurred. Please try again.')
     }
+    
     setLoading(false)
   }
 
@@ -69,6 +80,7 @@ export default function AuthPage() {
     }
     setLoading(false)
   }
+
 
   return (
     <div className="flex items-center justify-center min-h-screen w-full bg-background p-4">
@@ -196,6 +208,7 @@ export default function AuthPage() {
             </div>
           </form>
         )}
+
       </div>
     </div>
   )

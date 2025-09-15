@@ -29,16 +29,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session)
-        setUser(session?.user ?? null)
+      async (event, session) => {
+        // Handle token errors by clearing invalid sessions
+        if (event === 'TOKEN_REFRESHED' && !session) {
+          await supabase.auth.signOut()
+          setSession(null)
+          setUser(null)
+        } else {
+          setSession(session)
+          setUser(session?.user ?? null)
+        }
         setLoading(false)
       }
     )
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setUser(session?.user ?? null)
+    // Get initial session with error handling
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        // Clear invalid session
+        supabase.auth.signOut()
+        setSession(null)
+        setUser(null)
+      } else {
+        setSession(session)
+        setUser(session?.user ?? null)
+      }
       setLoading(false)
     })
 

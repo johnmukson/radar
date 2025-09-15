@@ -6,28 +6,92 @@ import { CheckCircle, XCircle, Loader2 } from 'lucide-react'
 export default function AuthConfirm() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading')
   const [message, setMessage] = useState('')
+  const [emailForResend, setEmailForResend] = useState<string | null>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
     const handleEmailConfirmation = async () => {
       try {
+        // Detect mobile device
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+        const isInAppBrowser = /FBAN|FBAV|Instagram|Line|WhatsApp|Twitter|LinkedIn/i.test(navigator.userAgent)
+        
+        // Clear any existing invalid sessions first
+        await supabase.auth.signOut()
+        
         // Get the current URL hash and search params
         const hash = window.location.hash
         const searchParams = new URLSearchParams(window.location.search)
         
-        // Check if this is an email confirmation callback
-        if (hash.includes('access_token') || searchParams.has('access_token')) {
-          // Handle the email confirmation
-          const { data, error } = await supabase.auth.getSession()
-          
-          if (error) {
-            console.error('Email confirmation error:', error)
+        // Check for various confirmation token patterns
+        const hasAccessToken = hash.includes('access_token') || searchParams.has('access_token')
+        const hasRefreshToken = hash.includes('refresh_token') || searchParams.has('refresh_token')
+        const hasTypeParam = searchParams.get('type') === 'signup' || searchParams.get('type') === 'recovery'
+        const hasToken = searchParams.has('token')
+        const hasCode = searchParams.has('code')
+        
+        // Check for error parameters first
+        const hasError = searchParams.has('error') || hash.includes('error=')
+        const errorCode = searchParams.get('error_code') || hash.match(/error_code=([^&]+)/)?.[1]
+        const errorDescription = searchParams.get('error_description') || hash.match(/error_description=([^&]+)/)?.[1]
+        
+        if (hasError) {
+          if (errorCode === 'otp_expired') {
             setStatus('error')
-            setMessage('Failed to confirm email. Please try again or contact support.')
+            const mobileMessage = isMobile ? 
+              'This confirmation link has expired. On mobile devices, please make sure to tap the link directly in your email app, not copy-paste it.' :
+              'This confirmation link has expired. We can automatically send you a new one that will be valid for 24 hours.'
+            setMessage(mobileMessage)
+            // Auto-extract email from URL if available
+            const emailFromUrl = searchParams.get('email') || hash.match(/email=([^&]+)/)?.[1]
+            if (emailFromUrl) {
+              setEmailForResend(emailFromUrl)
+            }
+            return
+          } else if (errorCode === 'access_denied') {
+            setStatus('error')
+            const mobileMessage = isMobile ?
+              'Access denied. On mobile devices, please try opening the confirmation link in your default browser instead of an in-app browser.' :
+              'Access denied. Please request a new confirmation email.'
+            setMessage(mobileMessage)
+            return
+          } else {
+            setStatus('error')
+            const mobileMessage = isMobile ?
+              `Confirmation failed: ${errorDescription || 'Unknown error'}. Try opening this link in your default browser instead of an in-app browser.` :
+              `Confirmation failed: ${errorDescription || 'Unknown error'}`
+            setMessage(mobileMessage)
             return
           }
+        }
+        
+        // Check if this is an email confirmation callback
+        if (hasAccessToken || hasRefreshToken || hasTypeParam || hasToken || hasCode) {
+          // Wait a moment for the URL to be processed by Supabase
+          await new Promise(resolve => setTimeout(resolve, 1000))
+          
+          // First, try to handle the confirmation using the URL
+          const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+          
+          if (sessionError) {
+            // Try to get user directly
+            const { data: userData, error: userError } = await supabase.auth.getUser()
+            
+            if (userError) {
+              setStatus('error')
+              setMessage(`Failed to confirm email: ${userError.message}`)
+              return
+            } else if (userData.user) {
+              setStatus('success')
+              setMessage('Email confirmed successfully! You can now sign in.')
+              setTimeout(() => {
+                navigate('/dashboard')
+              }, 3000)
+              return
+            }
+          }
 
-          if (data.session?.user) {
+          if (sessionData.session?.user) {
             setStatus('success')
             setMessage('Email confirmed successfully! You can now sign in.')
             
@@ -36,16 +100,28 @@ export default function AuthConfirm() {
               navigate('/dashboard')
             }, 3000)
           } else {
-            setStatus('error')
-            setMessage('Email confirmation failed. Please try again.')
+            // Try to handle the confirmation manually if session is not available
+            const { data: authData, error: authError } = await supabase.auth.getUser()
+            
+            if (authError) {
+              setStatus('error')
+              setMessage(`Email confirmation failed: ${authError.message}`)
+            } else if (authData.user) {
+              setStatus('success')
+              setMessage('Email confirmed successfully! You can now sign in.')
+              setTimeout(() => {
+                navigate('/dashboard')
+              }, 3000)
+            } else {
+              setStatus('error')
+              setMessage('Email confirmation failed. The confirmation link may be invalid or expired.')
+            }
           }
         } else {
-          // No confirmation tokens found
           setStatus('error')
           setMessage('Invalid confirmation link. Please check your email or request a new confirmation.')
         }
       } catch (error) {
-        console.error('Unexpected error during email confirmation:', error)
         setStatus('error')
         setMessage('An unexpected error occurred. Please try again.')
       }
@@ -58,9 +134,9 @@ export default function AuthConfirm() {
     setStatus('loading')
     setMessage('')
     
-    // Extract email from URL if available, or redirect to auth page
+    // Use email from state or extract from URL
     const searchParams = new URLSearchParams(window.location.search)
-    const email = searchParams.get('email')
+    const email = emailForResend || searchParams.get('email')
     
     if (email) {
       const { error } = await supabase.auth.resend({
@@ -76,7 +152,7 @@ export default function AuthConfirm() {
         setMessage(`Error: ${error.message}`)
       } else {
         setStatus('success')
-        setMessage('Confirmation email sent! Please check your inbox.')
+        setMessage('New confirmation email sent! Please check your inbox and click the link within 24 hours.')
       }
     } else {
       // Redirect to auth page if no email found
@@ -91,6 +167,29 @@ export default function AuthConfirm() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
+        {/* Mobile-specific warning */}
+        {/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="h-5 w-5 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-blue-800">Mobile Device Detected</h3>
+                <div className="mt-2 text-sm text-blue-700">
+                  <p>For best results on mobile:</p>
+                  <ul className="list-disc list-inside mt-1 space-y-1">
+                    <li>Tap the confirmation link directly in your email app</li>
+                    <li>Don't copy-paste the link</li>
+                    <li>Use your default browser, not in-app browsers</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="text-center">
           {status === 'loading' && (
             <>

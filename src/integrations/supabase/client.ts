@@ -14,6 +14,10 @@ const getCurrentDomain = () => {
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
     return 'http://localhost:5173'
   }
+  // Check for Lovable domains
+  if (window.location.hostname.includes('lovable.app') || window.location.hostname.includes('lovable.dev')) {
+    return window.location.origin
+  }
   // Fallback to current origin
   return window.location.origin
 }
