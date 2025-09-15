@@ -107,7 +107,7 @@ export default function AuthConfirm() {
                   
                   if (!resendError) {
                     setStatus('success')
-                    setMessage('A new confirmation email has been sent! Please check your inbox and click the new link.')
+                    setMessage('A new confirmation email has been sent! Please check your inbox and click the new link. You will be redirected to sign in after confirmation.')
                     return
                   }
                 }
@@ -142,10 +142,10 @@ export default function AuthConfirm() {
           
           if (confirmationSuccessful) {
             setStatus('success')
-            setMessage('Email confirmed successfully! You can now sign in.')
+            setMessage('Email confirmed successfully! Redirecting to sign in...')
             setTimeout(() => {
-              navigate('/dashboard')
-            }, 3000)
+              navigate('/auth')
+            }, 2000)
           } else {
             setStatus('error')
             
@@ -203,7 +203,7 @@ export default function AuthConfirm() {
         setMessage(`Error: ${error.message}`)
       } else {
         setStatus('success')
-        setMessage('New confirmation email sent! Please check your inbox and click the link within 24 hours.')
+        setMessage('New confirmation email sent! Please check your inbox and click the link within 24 hours. You will be redirected to sign in after confirmation.')
       }
     } else {
       // Redirect to auth page if no email found
@@ -263,14 +263,14 @@ export default function AuthConfirm() {
               <p className="mt-2 text-sm text-gray-600">
                 {message}
               </p>
-              <div className="mt-4">
-                <button
-                  onClick={() => navigate('/dashboard')}
-                  className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700"
-                >
-                  Go to Dashboard
-                </button>
-              </div>
+                  <div className="mt-4">
+                    <button
+                      onClick={() => navigate('/auth')}
+                      className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700"
+                    >
+                      Go to Sign In
+                    </button>
+                  </div>
             </>
           )}
 
