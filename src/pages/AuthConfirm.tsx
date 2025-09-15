@@ -68,53 +68,104 @@ export default function AuthConfirm() {
         // Check if this is an email confirmation callback
         if (hasAccessToken || hasRefreshToken || hasTypeParam || hasToken || hasCode) {
           // Wait a moment for the URL to be processed by Supabase
-          await new Promise(resolve => setTimeout(resolve, 1000))
+          await new Promise(resolve => setTimeout(resolve, 1500))
           
-          // First, try to handle the confirmation using the URL
+          // Try multiple times with increasing delays
+          const maxRetries = 3
+          let retryCount = 0
+          
+          // Try multiple approaches to handle the confirmation
+          let confirmationSuccessful = false
+          let errorMessage = ''
+          
+          // Approach 1: Try to get session
           const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
           
-          if (sessionError) {
-            // Try to get user directly
+          if (!sessionError && sessionData.session?.user) {
+            confirmationSuccessful = true
+          } else {
+            // Approach 2: Try to get user directly
             const { data: userData, error: userError } = await supabase.auth.getUser()
             
-            if (userError) {
-              setStatus('error')
-              setMessage(`Failed to confirm email: ${userError.message}`)
-              return
-            } else if (userData.user) {
-              setStatus('success')
-              setMessage('Email confirmed successfully! You can now sign in.')
-              setTimeout(() => {
-                navigate('/dashboard')
-              }, 3000)
-              return
+            if (!userError && userData.user) {
+              confirmationSuccessful = true
+            } else {
+              // Approach 3: Try to manually verify the email using the URL parameters
+              try {
+                // Extract email from URL if available
+                const emailFromUrl = searchParams.get('email') || hash.match(/email=([^&]+)/)?.[1]
+                
+                if (emailFromUrl) {
+                  // Try to resend confirmation to trigger a fresh confirmation
+                  const { error: resendError } = await supabase.auth.resend({
+                    type: 'signup',
+                    email: emailFromUrl,
+                    options: {
+                      emailRedirectTo: `${window.location.origin}/auth/confirm`
+                    }
+                  })
+                  
+                  if (!resendError) {
+                    setStatus('success')
+                    setMessage('A new confirmation email has been sent! Please check your inbox and click the new link.')
+                    return
+                  }
+                }
+              } catch (resendErr) {
+                // Continue to error handling
+              }
+              
+              // Approach 4: Try to manually parse and handle the confirmation URL
+              try {
+                // Check if we have access_token in the URL
+                const accessTokenMatch = hash.match(/access_token=([^&]+)/) || searchParams.get('access_token')
+                const refreshTokenMatch = hash.match(/refresh_token=([^&]+)/) || searchParams.get('refresh_token')
+                
+                if (accessTokenMatch) {
+                  // Try to set the session manually
+                  const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+                    access_token: accessTokenMatch[1] || accessTokenMatch,
+                    refresh_token: refreshTokenMatch?.[1] || refreshTokenMatch || ''
+                  })
+                  
+                  if (!sessionError && sessionData.session?.user) {
+                    confirmationSuccessful = true
+                  }
+                }
+              } catch (manualErr) {
+                // Continue to error handling
+              }
+              
+              errorMessage = userError?.message || sessionError?.message || 'Auth session missing!'
             }
           }
-
-          if (sessionData.session?.user) {
+          
+          if (confirmationSuccessful) {
             setStatus('success')
             setMessage('Email confirmed successfully! You can now sign in.')
-            
-            // Redirect to dashboard after a short delay
             setTimeout(() => {
               navigate('/dashboard')
             }, 3000)
           } else {
-            // Try to handle the confirmation manually if session is not available
-            const { data: authData, error: authError } = await supabase.auth.getUser()
+            setStatus('error')
             
-            if (authError) {
-              setStatus('error')
-              setMessage(`Email confirmation failed: ${authError.message}`)
-            } else if (authData.user) {
-              setStatus('success')
-              setMessage('Email confirmed successfully! You can now sign in.')
-              setTimeout(() => {
-                navigate('/dashboard')
-              }, 3000)
-            } else {
-              setStatus('error')
-              setMessage('Email confirmation failed. The confirmation link may be invalid or expired.')
+            // Provide specific guidance for "Auth session missing!" error
+            let specificMessage = errorMessage
+            if (errorMessage.includes('Auth session missing') || errorMessage.includes('session missing')) {
+              specificMessage = isMobile ? 
+                'The confirmation link could not establish a session. This often happens on mobile devices. Please try opening the link in your default browser (Safari/Chrome) instead of an in-app browser, or request a new confirmation email.' :
+                'The confirmation link could not establish a session. This may be due to browser settings or network issues. Please try requesting a new confirmation email.'
+            }
+            
+            const mobileMessage = isMobile ? 
+              `Email confirmation failed: ${specificMessage}` :
+              `Email confirmation failed: ${specificMessage}`
+            setMessage(mobileMessage)
+            
+            // Try to extract email for resend
+            const emailFromUrl = searchParams.get('email') || hash.match(/email=([^&]+)/)?.[1]
+            if (emailFromUrl) {
+              setEmailForResend(emailFromUrl)
             }
           }
         } else {
