@@ -35,17 +35,17 @@ export const getDaysUntilExpiry = (expiryDate: string): number => {
 /**
  * Get the risk level based on days until expiry
  * @param expiryDate - The expiry date string
- * @returns string - Risk level: 'expired', 'critical', 'high', 'medium', 'low'
+ * @returns string - Risk level: 'expired', 'critical', 'high', 'low', 'very-low'
  */
 export const getRiskLevel = (expiryDate: string): string => {
   if (isExpired(expiryDate)) return 'expired';
   
   const daysToExpiry = getDaysUntilExpiry(expiryDate);
   
-  if (daysToExpiry <= 7) return 'critical';
-  if (daysToExpiry <= 30) return 'high';
-  if (daysToExpiry <= 90) return 'medium';
-  return 'low';
+  if (daysToExpiry <= 30) return 'critical';      // 0-30 days
+  if (daysToExpiry <= 60) return 'high';          // 31-60 days
+  if (daysToExpiry <= 180) return 'low';          // 61-180 days
+  return 'very-low';                              // 181+ days
 };
 
 /**

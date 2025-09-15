@@ -38,10 +38,10 @@ const getRiskLevel = (expiryDate: string) => {
   const expiry = new Date(expiryDate)
   const daysUntilExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
   if (daysUntilExpiry < 0) return { level: 'expired', color: 'destructive' }
-  if (daysUntilExpiry <= 60) return { level: 'critical', color: 'destructive' }
-  if (daysUntilExpiry <= 90) return { level: 'high', color: 'warning' }
-  if (daysUntilExpiry <= 120) return { level: 'medium', color: 'secondary' }
-  return { level: 'low', color: 'success' }
+  if (daysUntilExpiry <= 30) return { level: 'critical', color: 'destructive' }      // 0-30 days
+  if (daysUntilExpiry <= 60) return { level: 'high', color: 'warning' }             // 31-60 days
+  if (daysUntilExpiry <= 180) return { level: 'low', color: 'success' }             // 61-180 days
+  return { level: 'very-low', color: 'default' }                                    // 181+ days
 }
 
 const StockAdjustmentDialog = ({ stockItems, onStockUpdated }: StockAdjustmentDialogProps) => {
@@ -57,22 +57,39 @@ const StockAdjustmentDialog = ({ stockItems, onStockUpdated }: StockAdjustmentDi
     setLoading(true)
     try {
       const newQuantity = Math.max(0, selectedItem.quantity + quantityAdjustment)
+      const updateObj: { quantity: number; status?: string } = { quantity: newQuantity }
+      if (newQuantity === 0) updateObj.status = 'completed'
+      
       const { error: updateError } = await supabase
         .from('stock_items')
-        .update({ quantity: newQuantity })
+        .update(updateObj)
         .eq('id', selectedItem.id)
       if (updateError) throw updateError
+      
+      const movementType = newQuantity === 0 ? 'completion' : (quantityAdjustment > 0 ? 'stock_in' : 'stock_out')
+      const notes = newQuantity === 0 
+        ? `COMPLETED: ${selectedItem.product_name} - Item fully consumed`
+        : (adjustmentReason || `Manual quantity adjustment: ${quantityAdjustment > 0 ? '+' : ''}${quantityAdjustment}`)
       
       await supabase
         .from('stock_movement_history')
         .insert({
           stock_item_id: selectedItem.id,
-          movement_type: quantityAdjustment > 0 ? 'stock_in' : 'stock_out',
+          movement_type: movementType,
           quantity_moved: Math.abs(quantityAdjustment),
           to_branch_id: selectedItem.branch_id,
-          notes: adjustmentReason || `Manual quantity adjustment: ${quantityAdjustment > 0 ? '+' : ''}${quantityAdjustment}`,
+          notes: notes,
           moved_by: 'admin'
         })
+
+      // If quantity reached zero, update any associated weekly_tasks to completed
+      if (newQuantity === 0) {
+        await supabase
+          .from('weekly_tasks')
+          .update({ status: 'completed', updated_at: new Date().toISOString() })
+          .eq('product_id', selectedItem.id)
+          .eq('status', 'pending')
+      }
       
       toast({
         title: "Success",

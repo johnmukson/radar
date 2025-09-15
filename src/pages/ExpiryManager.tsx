@@ -67,10 +67,21 @@ const ExpiryManager = () => {
         .range(from, to)
       if (error) throw error
       const today = new Date()
-      const items = data.map(item => ({
-        ...item,
-        days_until_expiry: Math.ceil((new Date(item.expiry_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-      }))
+      const items = data.map(item => {
+        const daysUntilExpiry = Math.ceil((new Date(item.expiry_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+        let risk_level = 'very-low'
+        
+        if (daysUntilExpiry < 0) risk_level = 'expired'
+        else if (daysUntilExpiry <= 30) risk_level = 'critical'      // 0-30 days
+        else if (daysUntilExpiry <= 60) risk_level = 'high'          // 31-60 days
+        else if (daysUntilExpiry <= 180) risk_level = 'low'          // 61-180 days
+        
+        return {
+          ...item,
+          days_until_expiry: daysUntilExpiry,
+          risk_level
+        }
+      })
       setStockItems(items)
       setTotalCount(count || 0)
     } catch (error: unknown) {

@@ -112,10 +112,10 @@ const StockList = () => {
     const daysUntilExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
 
     if (daysUntilExpiry < 0) return { level: 'Expired', color: 'destructive' }
-    if (daysUntilExpiry <= 60) return { level: 'Critical', color: 'destructive' }
-    if (daysUntilExpiry <= 90) return { level: 'High', color: 'warning' }
-    if (daysUntilExpiry <= 120) return { level: 'Medium', color: 'secondary' }
-    return { level: 'Low', color: 'success' }
+    if (daysUntilExpiry <= 30) return { level: 'Critical', color: 'destructive' }      // 0-30 days
+    if (daysUntilExpiry <= 60) return { level: 'High', color: 'warning' }             // 31-60 days
+    if (daysUntilExpiry <= 180) return { level: 'Low', color: 'success' }             // 61-180 days
+    return { level: 'Very Low', color: 'default' }                                    // 181+ days
   }
 
   const deleteStockItem = async (id: string, item: StockItem) => {

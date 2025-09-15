@@ -868,7 +868,7 @@ export const Constants = {
         "branch_system_admin",
       ],
       priority_type: ["low", "medium", "high", "urgent"],
-      risk_level_type: ["low", "medium", "high", "critical"],
+      risk_level_type: ["very-low", "low", "high", "critical", "expired"],
       stock_status: ["pending", "assigned", "moved", "expired", "disposed"],
     },
   },

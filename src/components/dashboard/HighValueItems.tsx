@@ -62,11 +62,11 @@ const HighValueItems = () => {
               const value = item.unit_price * item.quantity
               
               // Calculate risk level based on days to expiry
-              let riskLevel = 'low'
+              let riskLevel = 'very-low'
               if (daysToExpiry < 0) riskLevel = 'expired'
-              else if (daysToExpiry <= 7) riskLevel = 'critical'
-              else if (daysToExpiry <= 30) riskLevel = 'high'
-              else if (daysToExpiry <= 90) riskLevel = 'medium'
+              else if (daysToExpiry <= 30) riskLevel = 'critical'      // 0-30 days
+              else if (daysToExpiry <= 60) riskLevel = 'high'          // 31-60 days
+              else if (daysToExpiry <= 180) riskLevel = 'low'          // 61-180 days
               
               return {
                 ...item,
@@ -159,7 +159,7 @@ const HighValueItems = () => {
     try {
       const newQty = adjustItem.quantity - adjustQty
       const updateObj: { quantity: number; status?: string } = { quantity: newQty }
-      if (newQty === 0) updateObj.status = 'out_of_stock'
+      if (newQty === 0) updateObj.status = 'completed'
       
       const { error: updateError } = await supabase
         .from('stock_items')
@@ -174,16 +174,21 @@ const HighValueItems = () => {
         throw new Error('User not authenticated')
       }
       
+      const movementType = newQty === 0 ? 'completion' : 'adjustment'
+      const notes = newQty === 0 
+        ? `COMPLETED: ${adjustItem.product_name} - Item fully consumed from high value items`
+        : `Quantity adjusted from high value items. Product: ${adjustItem.product_name}`
+      
       const movementData = {
         stock_item_id: adjustItem.id,
-        movement_type: 'adjustment',
+        movement_type: movementType,
         quantity_moved: adjustQty,
         from_branch_id: adjustItem.branch_id || null,
         to_branch_id: null, // No transfer, just adjustment
         for_dispenser: null, // Not assigned to specific dispenser
         moved_by: user.id,
         movement_date: new Date().toISOString(),
-        notes: `Quantity adjusted from high value items. Product: ${adjustItem.product_name}`
+        notes: notes
       }
 
       console.log('Attempting to insert movement data:', movementData)
@@ -199,6 +204,15 @@ const HighValueItems = () => {
         })
       } else {
         toast({ title: 'Success', description: `Quantity adjusted and movement recorded. New quantity: ${newQty}` })
+      }
+
+      // If quantity reached zero, update any associated weekly_tasks to completed
+      if (newQty === 0) {
+        await supabase
+          .from('weekly_tasks')
+          .update({ status: 'completed', updated_at: new Date().toISOString() })
+          .eq('product_id', adjustItem.id)
+          .eq('status', 'pending')
       }
 
       // Update local state

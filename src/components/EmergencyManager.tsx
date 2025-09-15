@@ -63,7 +63,6 @@ interface DispenserWorkload {
   total_assignments: number
   critical_assignments: number
   high_assignments: number
-  medium_assignments: number
   low_assignments: number
   expired_assignments: number
   total_quantity: number
@@ -148,12 +147,12 @@ const EmergencyManager = () => {
       // Calculate risk levels for stock items
       const itemsWithRisk = (stockResponse.data || []).map(item => {
         const daysToExpiry = Math.ceil((new Date(item.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
-        let risk_level = 'low'
+        let risk_level = 'very-low'
         
         if (daysToExpiry < 0) risk_level = 'expired'
-        else if (daysToExpiry <= 7) risk_level = 'critical'
-        else if (daysToExpiry <= 30) risk_level = 'high'
-        else if (daysToExpiry <= 90) risk_level = 'medium'
+        else if (daysToExpiry <= 30) risk_level = 'critical'      // 0-30 days
+        else if (daysToExpiry <= 60) risk_level = 'high'          // 31-60 days
+        else if (daysToExpiry <= 180) risk_level = 'low'          // 61-180 days
         
         return { ...item, risk_level }
       })
@@ -216,8 +215,8 @@ const EmergencyManager = () => {
       const riskCounts = {
         critical: 0,
         high: 0,
-        medium: 0,
         low: 0,
+        'very-low': 0,
         expired: 0
       }
 
@@ -232,16 +231,14 @@ const EmergencyManager = () => {
         
         if (daysTillDeadline <= 1) riskCounts.critical++
         else if (daysTillDeadline <= 3) riskCounts.high++
-        else if (daysTillDeadline <= 7) riskCounts.medium++
         else riskCounts.low++
       }
 
       // Calculate workload score (higher = more burdened)
-      // Critical assignments get highest weight, then high, medium, low
+      // Critical assignments get highest weight, then high, low
       const workloadScore = (
         riskCounts.critical * 10 +
         riskCounts.high * 5 +
-        riskCounts.medium * 3 +
         riskCounts.low * 1 +
         riskCounts.expired * 15 // Expired items are most critical
       ) + (totalQuantity * 0.1) // Small weight for quantity
@@ -253,7 +250,6 @@ const EmergencyManager = () => {
         total_assignments: dispenserAssignments.length,
         critical_assignments: riskCounts.critical,
         high_assignments: riskCounts.high,
-        medium_assignments: riskCounts.medium,
         low_assignments: riskCounts.low,
         expired_assignments: riskCounts.expired,
         total_quantity: totalQuantity,
@@ -274,8 +270,8 @@ const EmergencyManager = () => {
       expired: emergencyItems.filter(item => item.risk_level === 'expired'),
       critical: emergencyItems.filter(item => item.risk_level === 'critical'),
       high: emergencyItems.filter(item => item.risk_level === 'high'),
-      medium: emergencyItems.filter(item => item.risk_level === 'medium'),
-      low: emergencyItems.filter(item => item.risk_level === 'low')
+      low: emergencyItems.filter(item => item.risk_level === 'low'),
+      'very-low': emergencyItems.filter(item => item.risk_level === 'very-low')
     }
 
     const assignments: { [key: string]: { [key: string]: number } } = {}
@@ -547,12 +543,12 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
       }
       
       // Group items by risk level (in priority order) - excluding expired
-      const riskLevels = ['critical', 'high', 'medium', 'low'] // Removed 'expired'
+      const riskLevels = ['critical', 'high', 'low', 'very-low'] // Removed 'expired'
       const itemsByRisk = {
         critical: nonExpiredEmergencyItems.filter(item => item.risk_level === 'critical'),
         high: nonExpiredEmergencyItems.filter(item => item.risk_level === 'high'),
-        medium: nonExpiredEmergencyItems.filter(item => item.risk_level === 'medium'),
-        low: nonExpiredEmergencyItems.filter(item => item.risk_level === 'low')
+        low: nonExpiredEmergencyItems.filter(item => item.risk_level === 'low'),
+        'very-low': nonExpiredEmergencyItems.filter(item => item.risk_level === 'very-low')
       }
 
       const allAssignments: Array<{
@@ -719,10 +715,10 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
   const getRiskColor = (riskLevel: string) => {
     switch (riskLevel) {
       case 'expired': return 'bg-red-600'
-      case 'critical': return 'bg-red-500'
-      case 'high': return 'bg-orange-500'
-      case 'medium': return 'bg-yellow-500'
-      case 'low': return 'bg-green-500'
+      case 'critical': return 'bg-red-500'      // 0-30 days
+      case 'high': return 'bg-orange-500'       // 31-60 days
+      case 'low': return 'bg-green-500'         // 61-180 days
+      case 'very-low': return 'bg-blue-500'     // 181+ days
       default: return 'bg-gray-500'
     }
   }

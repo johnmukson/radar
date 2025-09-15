@@ -294,8 +294,11 @@ const Analysis = () => {
 
       // Calculate money saved (items that were used before expiry)
       const { data: movementHistory, error: movementHistoryError } = await supabase
-        .from('stock_movement_history_view')
-        .select('*')
+        .from('stock_movement_history')
+        .select(`
+          *,
+          stock_items!inner(product_name, expiry_date, cost_price)
+        `)
         .gte('movement_date', startDate.toISOString())
 
       if (movementHistoryError) throw movementHistoryError

@@ -23,7 +23,7 @@ import { format, isAfter, endOfMonth, parseISO } from 'date-fns'
 import { isExpired } from '@/utils/expiryUtils'
 import { extractErrorMessage } from '@/lib/utils'
 
-const RISK_PRIORITY = ['critical', 'high', 'medium', 'low']
+const RISK_PRIORITY = ['critical', 'high', 'low', 'very-low']
 
 interface StockItem {
   id: string;

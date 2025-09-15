@@ -61,11 +61,32 @@ const LedgerBoard = () => {
   const loadMovements = useCallback(async () => {
     try {
       const { data, error } = await supabase
-        .from('stock_movement_history_view')
-        .select('*')
+        .from('stock_movement_history')
+        .select(`
+          *,
+          stock_items!inner(product_name),
+          from_branch:branches!stock_movement_history_from_branch_id_fkey(name),
+          to_branch:branches!stock_movement_history_to_branch_id_fkey(name),
+          moved_by_user:users!stock_movement_history_moved_by_fkey(name)
+        `)
         .order('movement_date', { ascending: false })
       if (error) throw error
-      setMovements(data || [])
+      
+      // Transform the data to match the expected interface
+      const transformedData = data?.map(movement => ({
+        id: movement.id,
+        movement_date: movement.movement_date,
+        movement_type: movement.movement_type,
+        from_branch: movement.from_branch?.name || 'Unknown Branch',
+        to_branch: movement.to_branch?.name || 'Unknown Branch',
+        quantity_moved: movement.quantity_moved,
+        moved_by: movement.moved_by_user?.name || 'Unknown User',
+        notes: movement.notes,
+        for_dispenser: movement.for_dispenser,
+        product_name: movement.stock_items?.product_name || 'Unknown Product'
+      })) || []
+      
+      setMovements(transformedData)
     } catch (error: unknown) {
       // Better error message extraction
       let errorMessage = "Failed to load stock movements"
@@ -115,17 +136,58 @@ const LedgerBoard = () => {
           startDate.setDate(now.getDate() - 7)
       }
 
-      // Get all dispensers
-      const { data: dispensers, error: dispensersError } = await supabase
-        .from('users_with_roles')
-        .select('user_id, name, branch_name')
-        .eq('role', 'dispenser')
+      // Get all dispensers - try direct query first, then fallback to view
+      let dispensers = null
+      let dispensersError = null
+      
+      // First try direct query from users and user_roles tables
+      const { data: directDispensers, error: directError } = await supabase
+        .from('users')
+        .select(`
+          id,
+          name,
+          user_roles!inner(role, branch_id),
+          branches!user_roles(branch_id, name)
+        `)
+        .eq('user_roles.role', 'dispenser')
+      
+      if (directError) {
+        console.error('Direct query failed, trying view:', directError)
+        // Fallback to view
+        const { data: viewDispensers, error: viewError } = await supabase
+          .from('users_with_roles')
+          .select('user_id, name, branch_name')
+          .eq('role', 'dispenser')
+        
+        dispensers = viewDispensers
+        dispensersError = viewError
+      } else {
+        // Transform direct query results to match expected format
+        dispensers = directDispensers?.map(user => ({
+          user_id: user.id,
+          name: user.name,
+          branch_name: (user.branches as any)?.name || 'Unknown Branch'
+        })) || []
+        dispensersError = null
+      }
 
       if (dispensersError) throw dispensersError
+      
+      // Debug: Log the dispensers data to see what we're getting
+      console.log('Dispensers fetched:', dispensers)
+      console.log('Dispenser user_id types:', dispensers?.map(d => ({ name: d.name, user_id: d.user_id, type: typeof d.user_id })))
 
       const performanceData: DispenserPerformance[] = []
 
       for (const dispenser of dispensers || []) {
+        console.log('Processing dispenser:', dispenser.name, 'ID:', dispenser.user_id)
+        
+        // Validate that user_id is a valid UUID
+        if (!dispenser.user_id || typeof dispenser.user_id !== 'string' || !dispenser.user_id.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+          console.error(`Invalid user_id for dispenser ${dispenser.name}:`, dispenser.user_id)
+          continue // Skip this dispenser
+        }
+        
         // Get tasks for this dispenser
         const { data: tasks, error: tasksError } = await supabase
           .from('weekly_tasks')
@@ -135,21 +197,94 @@ const LedgerBoard = () => {
 
         if (tasksError) throw tasksError
 
-        // Get adjustments made by this dispenser
-        const { data: adjustments, error: adjustmentsError } = await supabase
+        // Get all stock movements made by this dispenser
+        // First try by user ID, then by user name as fallback
+        let adjustments = null
+        let adjustmentsError = null
+        
+        // Try to get movements by user ID first
+        const { data: adjustmentsById, error: errorById } = await supabase
           .from('stock_movement_history')
           .select('*')
-          .in('movement_type', ['adjustment', 'completion'])
+          .in('movement_type', [
+            'adjustment', 'completion', 'dispense', 'stock_in', 'stock_out', 
+            'stock_adjustment', 'removal', 'deletion', 'emergency_declared', 
+            'emergency_assigned', 'bulk_deletion'
+          ])
           .eq('moved_by', dispenser.user_id)
           .gte('movement_date', startDate.toISOString())
+        
+        if (errorById) {
+          console.error(`Error fetching movements by ID for ${dispenser.name}:`, errorById)
+        }
+        
+        // If no movements found by ID, try to find movements by looking up the user ID from name
+        if (!adjustmentsById || adjustmentsById.length === 0) {
+          // First, try to find the user ID by name
+          const { data: userByName, error: userError } = await supabase
+            .from('users')
+            .select('id')
+            .eq('name', dispenser.name)
+            .single()
+          
+          if (userError) {
+            console.error(`Error finding user by name ${dispenser.name}:`, userError)
+            adjustments = []
+            adjustmentsError = null
+          } else if (userByName) {
+            // Now get movements by the found user ID
+            const { data: adjustmentsByName, error: errorByName } = await supabase
+              .from('stock_movement_history')
+              .select('*')
+              .in('movement_type', [
+                'adjustment', 'completion', 'dispense', 'stock_in', 'stock_out', 
+                'stock_adjustment', 'removal', 'deletion', 'emergency_declared', 
+                'emergency_assigned', 'bulk_deletion'
+              ])
+              .eq('moved_by', userByName.id)
+              .gte('movement_date', startDate.toISOString())
+            
+            if (errorByName) {
+              console.error(`Error fetching movements by found user ID for ${dispenser.name}:`, errorByName)
+            }
+            
+            adjustments = adjustmentsByName
+            adjustmentsError = errorByName
+          } else {
+            adjustments = []
+            adjustmentsError = null
+          }
+        } else {
+          adjustments = adjustmentsById
+          adjustmentsError = errorById
+        }
+        
+        console.log(`Found ${adjustments?.length || 0} movements for ${dispenser.name}`)
 
-        if (adjustmentsError) throw adjustmentsError
+        if (adjustmentsError) {
+          console.error(`Error fetching movements for ${dispenser.name}:`, adjustmentsError)
+          throw adjustmentsError
+        }
+
+        // Debug: Let's also check all movements to see what user IDs exist
+        if (dispenser.name === 'MUKWAYA JOHNSON') {
+          const { data: allMovements } = await supabase
+            .from('stock_movement_history')
+            .select('moved_by, movement_type, notes, movement_date')
+            .gte('movement_date', startDate.toISOString())
+            .order('movement_date', { ascending: false })
+            .limit(10)
+          console.log('Recent movements in database:', allMovements)
+          console.log('Johnson user ID:', dispenser.user_id)
+          console.log('Movements by ID:', adjustmentsById)
+          console.log('Movements by name:', adjustments)
+        }
 
         const totalTasks = tasks?.length || 0
         const completedTasks = tasks?.filter(t => t.status === 'completed').length || 0
         const pendingTasks = tasks?.filter(t => t.status === 'pending').length || 0
-        const totalAdjustments = adjustments?.length || 0
-        const totalQuantityAdjusted = adjustments?.reduce((sum, adj) => sum + adj.quantity_moved, 0) || 0
+        const totalMovements = adjustments?.length || 0
+        const totalQuantityMoved = adjustments?.reduce((sum, adj) => sum + Math.abs(adj.quantity_moved), 0) || 0
         
         // Special scoring for completions (fully completed products)
         const completions = adjustments?.filter(adj => adj.movement_type === 'completion') || []
@@ -157,19 +292,19 @@ const LedgerBoard = () => {
         const completionBonus = totalCompletions * 10 // Extra credit for each completed product
         
         const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0
-        // Enhanced scoring that values small quantities and adjustments equally
+        // Enhanced scoring that values small quantities and movements equally
         const taskScore = completionRate * 0.3 // Reduced weight for tasks
-        const adjustmentScore = totalAdjustments * 4 // Increased weight for number of adjustments
-        const quantityScore = totalQuantityAdjusted * 1.5 // Increased weight for total quantity moved
+        const movementScore = totalMovements * 4 // Increased weight for number of movements
+        const quantityScore = totalQuantityMoved * 1.5 // Increased weight for total quantity moved
         
-        // Bonus for small quantity adjustments (encourages frequent small movements)
-        const smallAdjustments = adjustments?.filter(adj => adj.quantity_moved <= 5).length || 0
-        const smallAdjustmentBonus = smallAdjustments * 2 // Bonus for small adjustments
+        // Bonus for small quantity movements (encourages frequent small movements)
+        const smallMovements = adjustments?.filter(adj => Math.abs(adj.quantity_moved) <= 5).length || 0
+        const smallMovementBonus = smallMovements * 2 // Bonus for small movements
         
-        // Bonus for activity frequency (more adjustments = better)
-        const activityBonus = totalAdjustments >= 10 ? 20 : totalAdjustments >= 5 ? 10 : 0
+        // Bonus for activity frequency (more movements = better)
+        const activityBonus = totalMovements >= 10 ? 20 : totalMovements >= 5 ? 10 : 0
         
-        const efficiencyScore = Math.round(taskScore + adjustmentScore + quantityScore + smallAdjustmentBonus + activityBonus + completionBonus)
+        const efficiencyScore = Math.round(taskScore + movementScore + quantityScore + smallMovementBonus + activityBonus + completionBonus)
 
         // Calculate streak (consecutive days with activity)
         const activityDates = new Set()
@@ -215,8 +350,8 @@ const LedgerBoard = () => {
           total_tasks: totalTasks,
           completed_tasks: completedTasks,
           pending_tasks: pendingTasks,
-          total_adjustments: totalAdjustments,
-          total_quantity_adjusted: totalQuantityAdjusted,
+          total_adjustments: totalMovements,
+          total_quantity_adjusted: totalQuantityMoved,
           total_completions: totalCompletions,
           completion_rate: completionRate,
           efficiency_score: efficiencyScore,
@@ -539,7 +674,7 @@ const LedgerBoard = () => {
                           </div>
                                                      <div className="flex items-center gap-2 text-sm">
                              <Target className="h-4 w-4 text-blue-500" />
-                             <span>{perf.total_adjustments} adjustments ({perf.total_quantity_adjusted} units)</span>
+                             <span>{perf.total_adjustments} movements ({perf.total_quantity_adjusted} units)</span>
                            </div>
                           <div className="flex items-center gap-2 text-sm">
                             <TrendingUp className="h-4 w-4 text-purple-500" />
@@ -571,7 +706,7 @@ const LedgerBoard = () => {
                           <TableHead>Dispenser</TableHead>
                           <TableHead>Branch</TableHead>
                           <TableHead>Tasks</TableHead>
-                          <TableHead>Adjustments</TableHead>
+                          <TableHead>Movements</TableHead>
                           <TableHead>Completions</TableHead>
                           <TableHead>Quantity Moved</TableHead>
                           <TableHead>Completion Rate</TableHead>
@@ -607,7 +742,7 @@ const LedgerBoard = () => {
                                                          <TableCell>
                                <div className="flex items-center gap-2">
                                  <Target className="h-4 w-4 text-blue-500" />
-                                 <span>{perf.total_adjustments} adjustments</span>
+                                 <span>{perf.total_adjustments} movements</span>
                                </div>
                              </TableCell>
                             <TableCell>

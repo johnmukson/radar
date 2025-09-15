@@ -64,11 +64,11 @@ const ProductSearch = () => {
       // Calculate additional fields
       const itemsWithCalculations = (data || []).map(item => {
         const daysToExpiry = Math.ceil((new Date(item.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
-        let riskLevel = 'low'
-        if (daysToExpiry < 0) riskLevel = 'critical'
-        else if (daysToExpiry <= 7) riskLevel = 'critical'
-        else if (daysToExpiry <= 30) riskLevel = 'high'
-        else if (daysToExpiry <= 90) riskLevel = 'medium'
+        let riskLevel = 'very-low'
+        if (daysToExpiry < 0) riskLevel = 'expired'
+        else if (daysToExpiry <= 30) riskLevel = 'critical'      // 0-30 days
+        else if (daysToExpiry <= 60) riskLevel = 'high'          // 31-60 days
+        else if (daysToExpiry <= 180) riskLevel = 'low'          // 61-180 days
 
         return {
           ...item,
@@ -348,10 +348,11 @@ const ProductSearch = () => {
                           }
                           className={
                             item.status === 'moved' ? 'bg-green-600 text-white' :
-                            item.risk_level === 'critical' ? 'bg-red-500' :
-                            item.risk_level === 'high' ? 'bg-orange-500' :
-                            item.risk_level === 'medium' ? 'bg-yellow-500' :
-                            'bg-green-500'
+                            item.risk_level === 'expired' ? 'bg-red-600' :
+                            item.risk_level === 'critical' ? 'bg-red-500' :      // 0-30 days
+                            item.risk_level === 'high' ? 'bg-orange-500' :       // 31-60 days
+                            item.risk_level === 'low' ? 'bg-green-500' :         // 61-180 days
+                            'bg-blue-500'                                        // 181+ days
                           }
                         >
                           {item.status === 'moved' ? 'Completed' : item.status}
