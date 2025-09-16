@@ -216,8 +216,8 @@ const StockList = () => {
   }
   const grouped = groupByExpiry(nonExpiredItems)
   const categoryLabels: Record<string, string> = {
-    '31-60': '31–60 days (Critical)',
-    '61-90': '61–90 days (High Priority)',
+    '31-60': '31–60 days (High Priority)',
+    '61-90': '61–90 days (Medium-High Priority)',
     '91-120': '91–120 days (Medium-High Priority)',
     '121-180': '121–180 days (Medium Priority)',
     '181-365': '181–365 days (Low Priority)',
@@ -261,7 +261,7 @@ const StockList = () => {
     try {
       const newQty = adjustItem.quantity - adjustQty
       const updateObj: { quantity: number; status?: string } = { quantity: newQty }
-      if (newQty === 0) updateObj.status = 'inactive'
+      if (newQty === 0) updateObj.status = 'completed'
       const { error: updateError } = await supabase
         .from('stock_items')
         .update(updateObj)
@@ -269,14 +269,28 @@ const StockList = () => {
       if (updateError) throw updateError
       // Record movement
       const { data: { user } } = await supabase.auth.getUser()
+      const movementType = newQty === 0 ? 'completion' : 'dispense'
+      const notes = newQty === 0 
+        ? `COMPLETED: ${adjustQty} units of ${adjustItem.product_name} - Item fully consumed`
+        : `Dispensed ${adjustQty} units of ${adjustItem.product_name}`
+      
       await supabase.from('stock_movement_history').insert({
         stock_item_id: adjustItem.id,
-        movement_type: 'dispense',
+        movement_type: movementType,
         quantity_moved: adjustQty,
         to_branch_id: (adjustItem as StockItem & { branch_id?: string }).branch_id || null,
-        notes: `Dispensed by user`,
+        notes: notes,
         moved_by: user?.id || null
       })
+
+      // If quantity reached zero, update any associated weekly_tasks to completed
+      if (newQty === 0) {
+        await supabase
+          .from('weekly_tasks')
+          .update({ status: 'completed', updated_at: new Date().toISOString() })
+          .like('title', `%${adjustItem.product_name}%`)
+          .eq('status', 'pending')
+      }
       setAdjustDialogOpen(false)
       setAdjustItem(null)
       setAdjustQty(1)

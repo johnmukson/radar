@@ -18,10 +18,10 @@ const RiskLevelDefinitions = () => {
     },
     {
       level: 'high',
-      label: 'High Priority',
+      label: 'High Priority (Priority Degree)',
       days: '31-60 days',
       color: 'bg-orange-500',
-      description: 'Items expiring within 31-60 days - high priority for assignment',
+      description: 'Items expiring within 31-60 days - this becomes the priority degree in database',
       priority: 2
     },
     {
@@ -114,7 +114,7 @@ const RiskLevelDefinitions = () => {
                 Items are assigned to dispensers in priority order: Critical → High → Medium-High → Medium → Low → Very Low
               </p>
               <p className="text-blue-700 dark:text-blue-300 mt-1">
-                <strong>Database Mapping:</strong> Critical/High → Urgent, Medium-High → High, Medium → Medium, Low/Very-Low → Low
+                <strong>Database Mapping:</strong> Critical → Urgent, High → High (Priority Degree), Medium-High → Medium, Medium → Low, Low/Very-Low → Low
               </p>
             </div>
           </div>

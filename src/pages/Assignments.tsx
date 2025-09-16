@@ -194,14 +194,15 @@ const Assignments = () => {
   }
 
   // Map risk levels to valid priority values for weekly_tasks
+  // Second risk after pending becomes the priority degree
   const mapRiskToPriority = (riskLevel: string): string => {
     switch (riskLevel) {
-      case 'critical': return 'urgent'
-      case 'high': return 'high'
-      case 'medium-high': return 'high'
-      case 'medium': return 'medium'
-      case 'low': return 'low'
-      case 'very-low': return 'low'
+      case 'critical': return 'urgent'      // 1st risk → Urgent
+      case 'high': return 'high'            // 2nd risk → High (priority degree)
+      case 'medium-high': return 'medium'   // 3rd risk → Medium
+      case 'medium': return 'low'           // 4th risk → Low
+      case 'low': return 'low'              // 5th risk → Low
+      case 'very-low': return 'low'         // 6th risk → Low
       default: return 'medium'
     }
   }

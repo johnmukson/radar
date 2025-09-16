@@ -103,7 +103,61 @@ const DispenserTasks = () => {
         .order('date_field', { ascending: true });
 
       if (error) throw error;
-      setAssignedProducts(data || []);
+      
+      // Calculate dynamic priority based on available tasks
+      const calculateDynamicPriority = (tasks: any[]) => {
+        const tasksByRisk = tasks.reduce((acc, task) => {
+          const riskLevel = task.risk_level || 'very-low'
+          if (!acc[riskLevel]) acc[riskLevel] = []
+          acc[riskLevel].push(task)
+          return acc
+        }, {} as Record<string, any[]>)
+
+        const originalRiskOrder = ['critical', 'high', 'medium-high', 'medium', 'low', 'very-low']
+        
+        let highestAvailableRisk = null
+        for (const risk of originalRiskOrder) {
+          if (tasksByRisk[risk] && tasksByRisk[risk].length > 0) {
+            highestAvailableRisk = risk
+            break
+          }
+        }
+
+        if (!highestAvailableRisk) {
+          return { 'critical': 1, 'high': 2, 'medium-high': 3, 'medium': 4, 'low': 5, 'very-low': 6 }
+        }
+
+        const dynamicPriority: Record<string, number> = {}
+        let currentPriority = 1
+
+        for (const risk of originalRiskOrder) {
+          if (tasksByRisk[risk] && tasksByRisk[risk].length > 0) {
+            dynamicPriority[risk] = currentPriority
+            currentPriority++
+          }
+        }
+
+        return dynamicPriority
+      }
+      
+      const dynamicPriority = calculateDynamicPriority(data || [])
+      
+      const sortedData = (data || []).sort((a, b) => {
+        // First sort by dynamic priority
+        const aPriority = dynamicPriority[a.risk_level as keyof typeof dynamicPriority] || 999
+        const bPriority = dynamicPriority[b.risk_level as keyof typeof dynamicPriority] || 999
+        
+        if (aPriority !== bPriority) {
+          return aPriority - bPriority
+        }
+        
+        // If same priority, sort by expiry date (soonest first)
+        const aDate = new Date(a.date_field)
+        const bDate = new Date(b.date_field)
+        return aDate.getTime() - bDate.getTime()
+      })
+      
+      setAssignedProducts(sortedData);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       toast({

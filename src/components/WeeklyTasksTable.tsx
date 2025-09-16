@@ -380,7 +380,50 @@ const WeeklyTasksTable = () => {
     return () => clearTimeout(debounceTimer)
   }, [stockSearchTerm])
 
-  // Filter tasks based on days remaining and dispenser
+  // Calculate dynamic priority based on current available tasks
+  const calculateDynamicPriority = (tasks: WeeklyTask[]) => {
+    // Group tasks by their original risk level
+    const tasksByRisk = tasks.reduce((acc, task) => {
+      const riskLevel = task.risk_level || 'very-low'
+      if (!acc[riskLevel]) acc[riskLevel] = []
+      acc[riskLevel].push(task)
+      return acc
+    }, {} as Record<string, WeeklyTask[]>)
+
+    // Define original risk level order
+    const originalRiskOrder = ['critical', 'high', 'medium-high', 'medium', 'low', 'very-low']
+    
+    // Find the highest available risk level
+    let highestAvailableRisk = null
+    for (const risk of originalRiskOrder) {
+      if (tasksByRisk[risk] && tasksByRisk[risk].length > 0) {
+        highestAvailableRisk = risk
+        break
+      }
+    }
+
+    // If no tasks available, return original mapping
+    if (!highestAvailableRisk) {
+      return {
+        'critical': 1, 'high': 2, 'medium-high': 3, 'medium': 4, 'low': 5, 'very-low': 6
+      }
+    }
+
+    // Create dynamic priority mapping where highest available becomes priority 1
+    const dynamicPriority: Record<string, number> = {}
+    let currentPriority = 1
+
+    for (const risk of originalRiskOrder) {
+      if (tasksByRisk[risk] && tasksByRisk[risk].length > 0) {
+        dynamicPriority[risk] = currentPriority
+        currentPriority++
+      }
+    }
+
+    return dynamicPriority
+  }
+
+  // Filter and sort tasks based on days remaining and dispenser
   const tasks = useMemo(() => {
     let filteredTasks = allTasks
     
@@ -417,7 +460,23 @@ const WeeklyTasksTable = () => {
       })
     }
     
-    return filteredTasks
+    // Calculate dynamic priority based on available tasks
+    const dynamicPriority = calculateDynamicPriority(filteredTasks)
+    
+    return filteredTasks.sort((a, b) => {
+      // First sort by dynamic priority
+      const aPriority = dynamicPriority[a.risk_level as keyof typeof dynamicPriority] || 999
+      const bPriority = dynamicPriority[b.risk_level as keyof typeof dynamicPriority] || 999
+      
+      if (aPriority !== bPriority) {
+        return aPriority - bPriority
+      }
+      
+      // If same priority, sort by expiry date (soonest first)
+      const aDate = new Date(a.due_date)
+      const bDate = new Date(b.due_date)
+      return aDate.getTime() - bDate.getTime()
+    })
   }, [allTasks, daysFilter, dispenserFilter])
 
   // Filter stock items based on search term
@@ -446,6 +505,36 @@ const WeeklyTasksTable = () => {
       case 'low': return 'bg-green-500'
       default: return 'bg-gray-500'
     }
+  }
+
+  // Get dynamic priority display based on current available tasks
+  const getDynamicPriorityDisplay = (riskLevel: string) => {
+    const dynamicPriority = calculateDynamicPriority(tasks)
+    const priority = dynamicPriority[riskLevel as keyof typeof dynamicPriority]
+    
+    if (priority === 1) return 'HIGH RISK'
+    if (priority === 2) return 'HIGH'
+    if (priority === 3) return 'MEDIUM-HIGH'
+    if (priority === 4) return 'MEDIUM'
+    if (priority === 5) return 'LOW'
+    if (priority === 6) return 'VERY LOW'
+    
+    return riskLevel?.toUpperCase() || 'UNKNOWN'
+  }
+
+  // Get dynamic priority color based on current available tasks
+  const getDynamicPriorityColor = (riskLevel: string) => {
+    const dynamicPriority = calculateDynamicPriority(tasks)
+    const priority = dynamicPriority[riskLevel as keyof typeof dynamicPriority]
+    
+    if (priority === 1) return 'bg-red-600'      // HIGH RISK
+    if (priority === 2) return 'bg-orange-500'   // HIGH
+    if (priority === 3) return 'bg-yellow-500'   // MEDIUM-HIGH
+    if (priority === 4) return 'bg-green-500'    // MEDIUM
+    if (priority === 5) return 'bg-blue-500'     // LOW
+    if (priority === 6) return 'bg-gray-500'     // VERY LOW
+    
+    return 'bg-gray-500'
   }
 
   const getRiskColor = (riskLevel: string) => {
@@ -731,8 +820,8 @@ const WeeklyTasksTable = () => {
                   </div>
                   
                   <div className="flex items-center gap-2">
-                    <Badge className={`${getRiskColor(task.risk_level!)} text-white text-xs`}>
-                      {task.risk_level?.toUpperCase()}
+                    <Badge className={`${getDynamicPriorityColor(task.risk_level!)} text-white text-xs`}>
+                      {getDynamicPriorityDisplay(task.risk_level!)}
                     </Badge>
                     <Badge className={`${getStatusColor(task.status)} text-white text-xs`}>
                       {task.status}

@@ -100,7 +100,17 @@ LEFT JOIN users assigned_user ON si.assigned_to = assigned_user.id
 LEFT JOIN branches b ON si.branch_id = b.id
 WHERE si.assigned_to IS NOT NULL
 
-ORDER BY date_field ASC;
+ORDER BY 
+  CASE 
+    WHEN si.expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 1
+    WHEN si.expiry_date <= CURRENT_DATE + INTERVAL '60 days' THEN 2
+    WHEN si.expiry_date <= CURRENT_DATE + INTERVAL '90 days' THEN 3
+    WHEN si.expiry_date <= CURRENT_DATE + INTERVAL '120 days' THEN 4
+    WHEN si.expiry_date <= CURRENT_DATE + INTERVAL '180 days' THEN 5
+    WHEN si.expiry_date <= CURRENT_DATE + INTERVAL '365 days' THEN 6
+    ELSE 7
+  END,
+  date_field ASC;
 
 -- Update weekly_assignments_view
 CREATE OR REPLACE VIEW public.weekly_assignments_view AS
