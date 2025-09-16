@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RefreshCw, Edit, Search } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import RiskLevelDefinitions from '@/components/RiskLevelDefinitions'
 
 interface WeeklyTask {
   id: string
@@ -54,16 +55,19 @@ const calculateRiskLevel = (dueDate: string): string => {
   const daysUntilDue = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
   
   if (daysUntilDue <= 30) return 'critical'      // 0-30 days
-  if (daysUntilDue <= 60) return 'high'          // 31-60 days
-  if (daysUntilDue <= 180) return 'low'          // 61-180 days
-  return 'very-low'                              // 181+ days
+  if (daysUntilDue <= 60) return 'high'          // 31-60 days (Critical range)
+  if (daysUntilDue <= 90) return 'medium-high'   // 61-90 days (High priority range)
+  if (daysUntilDue <= 120) return 'medium-high'  // 91-120 days (Medium-high priority range)
+  if (daysUntilDue <= 180) return 'medium'       // 121-180 days (Medium priority range)
+  if (daysUntilDue <= 365) return 'low'          // 181-365 days (Low priority range)
+  return 'very-low'                              // 365+ days (Very low priority range)
 }
 
 const WeeklyTasksTable = () => {
   const [allTasks, setAllTasks] = useState<WeeklyTask[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [daysFilter, setDaysFilter] = useState<string>('31-60')
+  const [daysFilter, setDaysFilter] = useState<string>('all')
   const [dispenserFilter, setDispenserFilter] = useState<string>('all')
   const [dispensers, setDispensers] = useState<{id: string, name: string}[]>([])
   
@@ -393,6 +397,8 @@ const WeeklyTasksTable = () => {
         const daysUntilDue = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
         
         switch (daysFilter) {
+          case '0-30':
+            return daysUntilDue >= 0 && daysUntilDue <= 30
           case '31-60':
             return daysUntilDue >= 31 && daysUntilDue <= 60
           case '61-90':
@@ -445,9 +451,11 @@ const WeeklyTasksTable = () => {
   const getRiskColor = (riskLevel: string) => {
     switch (riskLevel) {
       case 'critical': return 'bg-red-600'      // 0-30 days
-      case 'high': return 'bg-orange-500'       // 31-60 days
-      case 'low': return 'bg-green-500'         // 61-180 days
-      case 'very-low': return 'bg-blue-500'     // 181+ days
+      case 'high': return 'bg-orange-500'       // 31-60 days (Critical range)
+      case 'medium-high': return 'bg-yellow-500' // 61-120 days (High/Medium-high priority range)
+      case 'medium': return 'bg-green-500'      // 121-180 days (Medium priority range)
+      case 'low': return 'bg-blue-500'          // 181-365 days (Low priority range)
+      case 'very-low': return 'bg-gray-500'     // 365+ days (Very low priority range)
       default: return 'bg-gray-500'
     }
   }
@@ -500,6 +508,11 @@ const WeeklyTasksTable = () => {
                </div>
              </div>
 
+      {/* Risk Level Definitions */}
+      <div className="mb-6">
+        <RiskLevelDefinitions />
+      </div>
+
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2">
@@ -536,7 +549,8 @@ const WeeklyTasksTable = () => {
             </SelectTrigger>
             <SelectContent className="bg-slate-800 border-slate-700">
               <SelectItem value="all">All Tasks</SelectItem>
-              <SelectItem value="31-60">31-60 days</SelectItem>
+              <SelectItem value="0-30">0-30 days (Critical)</SelectItem>
+              <SelectItem value="31-60">31-60 days (High Priority)</SelectItem>
               <SelectItem value="61-90">61-90 days (2-3 months)</SelectItem>
               <SelectItem value="91-120">91-120 days (3-4 months)</SelectItem>
               <SelectItem value="121-180">121-180 days (4-6 months)</SelectItem>

@@ -33,9 +33,9 @@ export const getDaysUntilExpiry = (expiryDate: string): number => {
 };
 
 /**
- * Get the risk level based on days until expiry
+ * Get the risk level based on days until expiry (UNIFORM RANGES)
  * @param expiryDate - The expiry date string
- * @returns string - Risk level: 'expired', 'critical', 'high', 'low', 'very-low'
+ * @returns string - Risk level: 'expired', 'critical', 'high', 'medium-high', 'medium', 'low', 'very-low'
  */
 export const getRiskLevel = (expiryDate: string): string => {
   if (isExpired(expiryDate)) return 'expired';
@@ -43,9 +43,12 @@ export const getRiskLevel = (expiryDate: string): string => {
   const daysToExpiry = getDaysUntilExpiry(expiryDate);
   
   if (daysToExpiry <= 30) return 'critical';      // 0-30 days
-  if (daysToExpiry <= 60) return 'high';          // 31-60 days
-  if (daysToExpiry <= 180) return 'low';          // 61-180 days
-  return 'very-low';                              // 181+ days
+  if (daysToExpiry <= 60) return 'high';          // 31-60 days (Critical range)
+  if (daysToExpiry <= 90) return 'medium-high';   // 61-90 days (High priority range)
+  if (daysToExpiry <= 120) return 'medium-high';  // 91-120 days (Medium-high priority range)
+  if (daysToExpiry <= 180) return 'medium';       // 121-180 days (Medium priority range)
+  if (daysToExpiry <= 365) return 'low';          // 181-365 days (Low priority range)
+  return 'very-low';                              // 365+ days (Very low priority range)
 };
 
 /**

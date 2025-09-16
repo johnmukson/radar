@@ -39,9 +39,12 @@ const getRiskLevel = (expiryDate: string) => {
   const daysUntilExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
   if (daysUntilExpiry < 0) return { level: 'expired', color: 'destructive' }
   if (daysUntilExpiry <= 30) return { level: 'critical', color: 'destructive' }      // 0-30 days
-  if (daysUntilExpiry <= 60) return { level: 'high', color: 'warning' }             // 31-60 days
-  if (daysUntilExpiry <= 180) return { level: 'low', color: 'success' }             // 61-180 days
-  return { level: 'very-low', color: 'default' }                                    // 181+ days
+  if (daysUntilExpiry <= 60) return { level: 'high', color: 'warning' }             // 31-60 days (Critical range)
+  if (daysUntilExpiry <= 90) return { level: 'medium-high', color: 'warning' }     // 61-90 days (High priority range)
+  if (daysUntilExpiry <= 120) return { level: 'medium-high', color: 'warning' }    // 91-120 days (Medium-high priority range)
+  if (daysUntilExpiry <= 180) return { level: 'medium', color: 'success' }         // 121-180 days (Medium priority range)
+  if (daysUntilExpiry <= 365) return { level: 'low', color: 'default' }            // 181-365 days (Low priority range)
+  return { level: 'very-low', color: 'default' }                                   // 365+ days (Very low priority range)
 }
 
 const StockAdjustmentDialog = ({ stockItems, onStockUpdated }: StockAdjustmentDialogProps) => {

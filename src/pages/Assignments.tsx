@@ -22,8 +22,9 @@ import { useToast } from '@/hooks/use-toast'
 import { format, isAfter, endOfMonth, parseISO } from 'date-fns'
 import { isExpired } from '@/utils/expiryUtils'
 import { extractErrorMessage } from '@/lib/utils'
+import RiskLevelDefinitions from '@/components/RiskLevelDefinitions'
 
-const RISK_PRIORITY = ['critical', 'high', 'low', 'very-low']
+const RISK_PRIORITY = ['critical', 'high', 'medium-high', 'medium', 'low', 'very-low']
 
 interface StockItem {
   id: string;
@@ -80,7 +81,28 @@ const Assignments = () => {
       // IMMUTABLE LAW: Exclude expired items from assignments
       // Expired items should only be managed in Expiry Manager
       const nonExpiredItems = (items || []).filter(item => !isExpired(item.expiry_date))
-      setStockItems(nonExpiredItems)
+      
+      // Calculate risk levels for all items using uniform ranges
+      const today = new Date()
+      const itemsWithRiskLevels = nonExpiredItems.map(item => {
+        const daysUntilExpiry = Math.ceil((new Date(item.expiry_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+        let risk_level = 'very-low'
+        
+        if (daysUntilExpiry <= 30) risk_level = 'critical'      // 0-30 days
+        else if (daysUntilExpiry <= 60) risk_level = 'high'          // 31-60 days (Critical range)
+        else if (daysUntilExpiry <= 90) risk_level = 'medium-high'   // 61-90 days (High priority range)
+        else if (daysUntilExpiry <= 120) risk_level = 'medium-high'  // 91-120 days (Medium-high priority range)
+        else if (daysUntilExpiry <= 180) risk_level = 'medium'       // 121-180 days (Medium priority range)
+        else if (daysUntilExpiry <= 365) risk_level = 'low'          // 181-365 days (Low priority range)
+        else risk_level = 'very-low'                                 // 365+ days (Very low priority range)
+        
+        return {
+          ...item,
+          risk_level
+        }
+      })
+      
+      setStockItems(itemsWithRiskLevels)
       
       // Fetch dispensers
       const { data: disp, error: dispError } = await supabase
@@ -171,6 +193,19 @@ const Assignments = () => {
     toast({ title: 'Assignments Generated', description: `${result.length} assignments created (not yet saved)` })
   }
 
+  // Map risk levels to valid priority values for weekly_tasks
+  const mapRiskToPriority = (riskLevel: string): string => {
+    switch (riskLevel) {
+      case 'critical': return 'urgent'
+      case 'high': return 'high'
+      case 'medium-high': return 'high'
+      case 'medium': return 'medium'
+      case 'low': return 'low'
+      case 'very-low': return 'low'
+      default: return 'medium'
+    }
+  }
+
   // Save assignments to weekly_tasks
   const handleSaveAssignments = async () => {
     if (assignments.length === 0) {
@@ -186,7 +221,7 @@ const Assignments = () => {
         assigned_to: a.dispenser_id,
         assigned_by: user?.id,
         due_date: a.item.expiry_date,
-        priority: a.risk,
+        priority: mapRiskToPriority(a.risk),
         status: 'pending',
       }))
       const { error } = await supabase.from('weekly_tasks').insert(inserts)
@@ -296,6 +331,11 @@ const Assignments = () => {
       </div>
 
       <div className="p-6">
+        {/* Risk Level Definitions */}
+        <div className="mb-6">
+          <RiskLevelDefinitions />
+        </div>
+        
         {/* Assignments Table */}
         <Card className="bg-slate-800 border-slate-700">
           <CardHeader>

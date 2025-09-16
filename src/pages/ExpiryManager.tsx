@@ -17,6 +17,7 @@ import { supabase } from '@/integrations/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 import { extractErrorMessage } from '@/lib/utils'
+import RiskLevelDefinitions from '@/components/RiskLevelDefinitions'
 
 interface StockItem {
   id: string
@@ -73,8 +74,12 @@ const ExpiryManager = () => {
         
         if (daysUntilExpiry < 0) risk_level = 'expired'
         else if (daysUntilExpiry <= 30) risk_level = 'critical'      // 0-30 days
-        else if (daysUntilExpiry <= 60) risk_level = 'high'          // 31-60 days
-        else if (daysUntilExpiry <= 180) risk_level = 'low'          // 61-180 days
+        else if (daysUntilExpiry <= 60) risk_level = 'high'          // 31-60 days (Critical range)
+        else if (daysUntilExpiry <= 90) risk_level = 'medium-high'   // 61-90 days (High priority range)
+        else if (daysUntilExpiry <= 120) risk_level = 'medium-high'  // 91-120 days (Medium-high priority range)
+        else if (daysUntilExpiry <= 180) risk_level = 'medium'       // 121-180 days (Medium priority range)
+        else if (daysUntilExpiry <= 365) risk_level = 'low'          // 181-365 days (Low priority range)
+        else risk_level = 'very-low'                                 // 365+ days (Very low priority range)
         
         return {
           ...item,
@@ -392,6 +397,11 @@ const ExpiryManager = () => {
               </p>
             </CardContent>
           </Card>
+        </div>
+
+        {/* Risk Level Definitions */}
+        <div className="mb-6">
+          <RiskLevelDefinitions />
         </div>
 
         {/* Tabs */}

@@ -144,15 +144,19 @@ const EmergencyManager = () => {
       if (dispensersResponse.error) throw dispensersResponse.error
       if (assignmentsResponse.error) throw assignmentsResponse.error
 
-      // Calculate risk levels for stock items
+      // Calculate risk levels for stock items (UNIFORM RANGES)
       const itemsWithRisk = (stockResponse.data || []).map(item => {
         const daysToExpiry = Math.ceil((new Date(item.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
         let risk_level = 'very-low'
         
         if (daysToExpiry < 0) risk_level = 'expired'
         else if (daysToExpiry <= 30) risk_level = 'critical'      // 0-30 days
-        else if (daysToExpiry <= 60) risk_level = 'high'          // 31-60 days
-        else if (daysToExpiry <= 180) risk_level = 'low'          // 61-180 days
+        else if (daysToExpiry <= 60) risk_level = 'high'          // 31-60 days (Critical range)
+        else if (daysToExpiry <= 90) risk_level = 'medium-high'   // 61-90 days (High priority range)
+        else if (daysToExpiry <= 120) risk_level = 'medium-high'  // 91-120 days (Medium-high priority range)
+        else if (daysToExpiry <= 180) risk_level = 'medium'       // 121-180 days (Medium priority range)
+        else if (daysToExpiry <= 365) risk_level = 'low'          // 181-365 days (Low priority range)
+        else risk_level = 'very-low'                               // 365+ days (Very low priority range)
         
         return { ...item, risk_level }
       })
@@ -716,9 +720,11 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
     switch (riskLevel) {
       case 'expired': return 'bg-red-600'
       case 'critical': return 'bg-red-500'      // 0-30 days
-      case 'high': return 'bg-orange-500'       // 31-60 days
-      case 'low': return 'bg-green-500'         // 61-180 days
-      case 'very-low': return 'bg-blue-500'     // 181+ days
+      case 'high': return 'bg-orange-500'       // 31-60 days (Critical range)
+      case 'medium-high': return 'bg-yellow-500' // 61-120 days (High/Medium-high priority range)
+      case 'medium': return 'bg-green-500'      // 121-180 days (Medium priority range)
+      case 'low': return 'bg-blue-500'          // 181-365 days (Low priority range)
+      case 'very-low': return 'bg-gray-500'     // 365+ days (Very low priority range)
       default: return 'bg-gray-500'
     }
   }

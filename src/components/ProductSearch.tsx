@@ -67,8 +67,12 @@ const ProductSearch = () => {
         let riskLevel = 'very-low'
         if (daysToExpiry < 0) riskLevel = 'expired'
         else if (daysToExpiry <= 30) riskLevel = 'critical'      // 0-30 days
-        else if (daysToExpiry <= 60) riskLevel = 'high'          // 31-60 days
-        else if (daysToExpiry <= 180) riskLevel = 'low'          // 61-180 days
+        else if (daysToExpiry <= 60) riskLevel = 'high'          // 31-60 days (Critical range)
+        else if (daysToExpiry <= 90) riskLevel = 'medium-high'   // 61-90 days (High priority range)
+        else if (daysToExpiry <= 120) riskLevel = 'medium-high'  // 91-120 days (Medium-high priority range)
+        else if (daysToExpiry <= 180) riskLevel = 'medium'       // 121-180 days (Medium priority range)
+        else if (daysToExpiry <= 365) riskLevel = 'low'          // 181-365 days (Low priority range)
+        else riskLevel = 'very-low'                              // 365+ days (Very low priority range)
 
         return {
           ...item,
@@ -350,8 +354,11 @@ const ProductSearch = () => {
                             item.status === 'moved' ? 'bg-green-600 text-white' :
                             item.risk_level === 'expired' ? 'bg-red-600' :
                             item.risk_level === 'critical' ? 'bg-red-500' :      // 0-30 days
-                            item.risk_level === 'high' ? 'bg-orange-500' :       // 31-60 days
-                            item.risk_level === 'low' ? 'bg-green-500' :         // 61-180 days
+                            item.risk_level === 'high' ? 'bg-orange-500' :       // 31-60 days (Critical range)
+                            item.risk_level === 'medium-high' ? 'bg-yellow-500' : // 61-120 days (High/Medium-high priority range)
+                            item.risk_level === 'medium' ? 'bg-green-500' :      // 121-180 days (Medium priority range)
+                            item.risk_level === 'low' ? 'bg-blue-500' :          // 181-365 days (Low priority range)
+                            item.risk_level === 'very-low' ? 'bg-gray-500' :     // 365+ days (Very low priority range)
                             'bg-blue-500'                                        // 181+ days
                           }
                         >

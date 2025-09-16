@@ -113,9 +113,12 @@ const StockList = () => {
 
     if (daysUntilExpiry < 0) return { level: 'Expired', color: 'destructive' }
     if (daysUntilExpiry <= 30) return { level: 'Critical', color: 'destructive' }      // 0-30 days
-    if (daysUntilExpiry <= 60) return { level: 'High', color: 'warning' }             // 31-60 days
-    if (daysUntilExpiry <= 180) return { level: 'Low', color: 'success' }             // 61-180 days
-    return { level: 'Very Low', color: 'default' }                                    // 181+ days
+    if (daysUntilExpiry <= 60) return { level: 'High', color: 'warning' }             // 31-60 days (Critical range)
+    if (daysUntilExpiry <= 90) return { level: 'Medium-High', color: 'warning' }     // 61-90 days (High priority range)
+    if (daysUntilExpiry <= 120) return { level: 'Medium-High', color: 'warning' }    // 91-120 days (Medium-high priority range)
+    if (daysUntilExpiry <= 180) return { level: 'Medium', color: 'success' }         // 121-180 days (Medium priority range)
+    if (daysUntilExpiry <= 365) return { level: 'Low', color: 'default' }            // 181-365 days (Low priority range)
+    return { level: 'Very Low', color: 'default' }                                   // 365+ days (Very low priority range)
   }
 
   const deleteStockItem = async (id: string, item: StockItem) => {
@@ -190,29 +193,35 @@ const StockList = () => {
   const nonExpiredItems = stockItems.filter(item => !isExpired(item.expiry_date))
   const expiredItems = stockItems.filter(item => isExpired(item.expiry_date))
 
-  // Group items by expiry categories
+  // Group items by expiry categories (UNIFORM RANGES)
   const groupByExpiry = (items: StockItem[]) => {
     const groups: Record<string, StockItem[]> = {
-      '30-60': [],
-      '60-120': [],
-      '120-180': [],
-      '180-365': [],
+      '31-60': [],
+      '61-90': [],
+      '91-120': [],
+      '121-180': [],
+      '181-365': [],
+      '365+': [],
     }
     items.forEach(item => {
       const days = Math.ceil((new Date(item.expiry_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
-      if (days > 30 && days <= 60) groups['30-60'].push(item)
-      else if (days > 60 && days <= 120) groups['60-120'].push(item)
-      else if (days > 120 && days <= 180) groups['120-180'].push(item)
-      else if (days > 180 && days <= 365) groups['180-365'].push(item)
+      if (days >= 31 && days <= 60) groups['31-60'].push(item)
+      else if (days >= 61 && days <= 90) groups['61-90'].push(item)
+      else if (days >= 91 && days <= 120) groups['91-120'].push(item)
+      else if (days >= 121 && days <= 180) groups['121-180'].push(item)
+      else if (days >= 181 && days <= 365) groups['181-365'].push(item)
+      else if (days > 365) groups['365+'].push(item)
     })
     return groups
   }
   const grouped = groupByExpiry(nonExpiredItems)
   const categoryLabels: Record<string, string> = {
-    '30-60': '30–60 days',
-    '60-120': '60–120 days',
-    '120-180': '120–180 days',
-    '180-365': '180 days – 1 year',
+    '31-60': '31–60 days (Critical)',
+    '61-90': '61–90 days (High Priority)',
+    '91-120': '91–120 days (Medium-High Priority)',
+    '121-180': '121–180 days (Medium Priority)',
+    '181-365': '181–365 days (Low Priority)',
+    '365+': '365+ days (Very Low Priority)',
   }
 
   // Download CSV helper

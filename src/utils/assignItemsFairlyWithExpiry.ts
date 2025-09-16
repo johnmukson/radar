@@ -34,17 +34,14 @@ export function assignItemsFairlyWithExpiry(
   const validItems: Item[] = [];
   const expiredItemsReport: ExpiredItem[] = [];
 
-  // Step 1: Exclude items expiring this month or with <30 days left
+  // Step 1: Only exclude truly expired items (IMMUTABLE LAW)
   for (const item of items) {
     const expiry = new Date(item.expiryDate);
     const daysLeft = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    if (
-      expiry.getFullYear() === currentYear &&
-      expiry.getMonth() === currentMonth
-    ) {
-      expiredItemsReport.push({ ...item, reason: 'Expires this month' });
-    } else if (daysLeft < 30) {
-      expiredItemsReport.push({ ...item, reason: 'Less than 30 days shelf life' });
+    
+    // Only exclude items that are actually expired (negative days left)
+    if (daysLeft < 0) {
+      expiredItemsReport.push({ ...item, reason: 'Item has expired' });
     } else {
       validItems.push(item);
     }
