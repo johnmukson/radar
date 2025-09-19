@@ -99,7 +99,7 @@ const menuItems = [
     title: "Dormant Stock",
     url: "/dormant-stock",
     icon: Archive,
-    roles: ['admin', 'system_admin'],
+    roles: ['admin', 'system_admin', 'regional_manager', 'branch_system_admin', 'dispenser'],
   },
 ]
 
