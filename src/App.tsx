@@ -4,10 +4,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { BranchProvider } from "@/contexts/BranchContext";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
+import BranchSelection from "./pages/BranchSelection";
 import AuthConfirm from "./pages/AuthConfirm";
 import CreateUser from "./pages/CreateUser";
 import Dashboard from "./pages/Dashboard";
@@ -34,15 +36,17 @@ const App = () => (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <AuthProvider>
-          <StockAdjusterProvider>
-            <Toaster />
-            <Sonner />
-            <BrowserRouter>
+          <BranchProvider>
+            <StockAdjusterProvider>
+              <Toaster />
+              <Sonner />
+              <BrowserRouter>
               <div className="min-h-screen flex w-full">
                 <Routes>
                   <Route path="/" element={<Index />} />
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/auth/confirm" element={<AuthConfirm />} />
+                  <Route path="/branch-selection" element={<BranchSelection />} />
                   <Route path="/update-password" element={<UpdatePassword />} />
                   <Route path="/create-user" element={<CreateUser />} />
                   
@@ -142,7 +146,8 @@ const App = () => (
                 <FloatingNotesButton />
               </div>
             </BrowserRouter>
-          </StockAdjusterProvider>
+            </StockAdjusterProvider>
+          </BranchProvider>
         </AuthProvider>
       </TooltipProvider>
     </QueryClientProvider>

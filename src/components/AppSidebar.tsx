@@ -27,12 +27,16 @@ import {
   Package,
   BarChart2,
   LogOut,
-  Archive
+  Archive,
+  Building2
 } from 'lucide-react'
 import { useUserRole } from '@/hooks/useUserRole'
+import { useBranch } from '@/contexts/BranchContext'
 import { useSidebar } from '@/components/ui/sidebar'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { supabase } from '@/integrations/supabase/client'
+import BranchSwitcher from '@/components/BranchSwitcher'
 
 const menuItems = [
   {
@@ -109,6 +113,7 @@ export function AppSidebar() {
   const navigate = useNavigate()
   const location = useLocation()
   const { userRole, loading } = useUserRole()
+  const { selectedBranch, hasMultipleBranches } = useBranch()
   const { state } = useSidebar()
 
   const handleNavigation = (item: MenuItem) => {
@@ -138,18 +143,65 @@ export function AppSidebar() {
         </div>
       )}
       <Sidebar className="border-r" collapsible="offcanvas">
-        <SidebarHeader className="p-4 flex items-center gap-2">
+        <SidebarHeader className="p-4 flex flex-col gap-3">
           {/* Only show trigger in header if expanded */}
-          {state === 'expanded' && <SidebarTrigger />}
+          {state === 'expanded' && (
+            <div className="flex items-center gap-2">
+              <SidebarTrigger />
+            </div>
+          )}
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
               <Package className="w-6 h-6 text-white" />
             </div>
-            <div>
+            <div className="flex-1 min-w-0">
               <h2 className="font-semibold text-lg">Stock Manager</h2>
               <p className="text-sm text-muted-foreground">UGX System</p>
             </div>
           </div>
+          
+          {/* Branch Context Display */}
+          {selectedBranch && state === 'expanded' && (
+            <div className="mt-2 pt-3 border-t">
+              <div className="flex items-center gap-2 mb-2">
+                <Building2 className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate" title={selectedBranch.name}>
+                    {selectedBranch.name}
+                  </div>
+                  <div className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Badge variant="outline" className="text-xs px-1.5 py-0">
+                      {selectedBranch.code}
+                    </Badge>
+                    {selectedBranch.region && (
+                      <span className="truncate" title={selectedBranch.region}>
+                        • {selectedBranch.region}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Branch Switcher - Only show if user has multiple branches */}
+              {hasMultipleBranches && (
+                <div className="mt-2">
+                  <BranchSwitcher />
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Collapsed Branch Display - Show only icon when collapsed */}
+          {selectedBranch && state === 'collapsed' && (
+            <div className="mt-2 pt-3 border-t flex justify-center">
+              <div className="flex flex-col items-center gap-1" title={`${selectedBranch.name} (${selectedBranch.code})`}>
+                <Building2 className="w-5 h-5 text-blue-400" />
+                <Badge variant="outline" className="text-xs px-1.5 py-0">
+                  {selectedBranch.code}
+                </Badge>
+              </div>
+            </div>
+          )}
         </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>

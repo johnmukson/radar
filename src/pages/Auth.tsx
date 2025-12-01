@@ -43,7 +43,8 @@ export default function AuthPage() {
           setError(`Sign in failed: ${error.message}`)
         }
       } else {
-        window.location.href = '/dashboard'
+        // Redirect to branch selection after successful login
+        window.location.href = '/branch-selection'
       }
     } catch (err) {
       setError('An unexpected error occurred. Please try again.')

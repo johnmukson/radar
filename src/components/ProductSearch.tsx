@@ -10,6 +10,7 @@ import { Search, Package, TrendingDown, TrendingUp, Calendar, DollarSign } from 
 import { supabase } from '@/integrations/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { useAuth } from '@/contexts/AuthContext'
+import { useBranch } from '@/contexts/BranchContext'
 import { format } from 'date-fns'
 import { extractErrorMessage } from '@/lib/utils'
 
@@ -30,6 +31,7 @@ interface StockItem {
 }
 
 const ProductSearch = () => {
+  const { selectedBranch, isSystemAdmin, isRegionalManager } = useBranch()
   const { user } = useAuth()
   const { toast } = useToast()
   const [searchTerm, setSearchTerm] = useState('')
@@ -47,15 +49,30 @@ const ProductSearch = () => {
       return
     }
 
+    // Don't search if no branch selected - ALL users need a selected branch
+    if (!selectedBranch) {
+      toast({
+        title: "No Branch Selected",
+        description: "Please select a branch before searching.",
+        variant: "destructive",
+      })
+      return
+    }
+
     setLoading(true)
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('stock_items')
         .select(`
           *,
           branches(name)
         `)
         .ilike('product_name', `%${term}%`)
+      
+      // ✅ ALWAYS filter by selected branch
+      query = query.eq('branch_id', selectedBranch.id)
+      
+      const { data, error } = await query
         .order('product_name', { ascending: true })
         .limit(20)
 

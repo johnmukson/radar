@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/integrations/supabase/client'
 import { useUserRole } from '@/hooks/useUserRole'
 import { useStockAdjuster } from '@/contexts/StockAdjusterContext'
+import { useBranch } from '@/contexts/BranchContext'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,7 @@ interface HighValueItem extends StockItem {
 }
 
 const HighValueItems = () => {
+  const { selectedBranch, isSystemAdmin, isRegionalManager } = useBranch()
   const [items, setItems] = useState<HighValueItem[]>([])
   const [loading, setLoading] = useState(true)
   const { userRole } = useUserRole()
@@ -39,15 +41,27 @@ const HighValueItems = () => {
 
   useEffect(() => {
     const fetchHighValueItems = async () => {
+      // Don't fetch if no branch selected - ALL users need a selected branch
+      if (!selectedBranch) {
+        setItems([])
+        setLoading(false)
+        return
+      }
+
       setLoading(true)
       try {
         // Get all stock items and filter for high value (unit_price * quantity > 100000)
-        const { data, error } = await supabase
+        let query = supabase
           .from('stock_items')
           .select(`
             *,
             branches(name)
           `)
+        
+        // ✅ ALWAYS filter by selected branch
+        query = query.eq('branch_id', selectedBranch.id)
+        
+        const { data, error } = await query
           .order('expiry_date', { ascending: true })
 
         if (error) {
@@ -87,7 +101,7 @@ const HighValueItems = () => {
     }
 
     fetchHighValueItems()
-  }, [])
+  }, [selectedBranch]) // ✅ Re-fetch when branch changes
 
   const groupedItems = useMemo(() => {
     const groups: { [key: string]: HighValueItem[] } = {}

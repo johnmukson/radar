@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUserRole } from '@/hooks/useUserRole'
+import { useBranch } from '@/contexts/BranchContext'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,7 +13,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Shield, Search, Filter, Download, ArrowUpDown, Calendar, Package, Building, User, Trophy, Target, TrendingUp, TrendingDown, Award, Clock, CheckCircle, XCircle, AlertTriangle, Trash2, FileText, BarChart2 } from 'lucide-react'
+import { Shield, Search, Filter, Download, ArrowUpDown, Calendar, Package, Building, User, Trophy, Target, TrendingUp, TrendingDown, Award, Clock, CheckCircle, XCircle, AlertTriangle, Trash2, FileText, BarChart2, Building2 } from 'lucide-react'
 import { supabase } from '@/integrations/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
@@ -34,6 +35,7 @@ interface StockItem {
 }
 
 const ExpiryManager = () => {
+  const { selectedBranch, isSystemAdmin, isRegionalManager } = useBranch()
   const [selectedFilter, setSelectedFilter] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
   const [stockItems, setStockItems] = useState<StockItem[]>([])
@@ -54,16 +56,184 @@ const ExpiryManager = () => {
 
   useEffect(() => {
     fetchStockItems()
-  }, [page]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [page, selectedBranch, isSystemAdmin, isRegionalManager]) // Re-fetch when branch changes
+
+  // Check for expiry warnings and send WhatsApp notifications
+  useEffect(() => {
+    const checkExpiryWarnings = async () => {
+      if (!selectedBranch || !user?.id || !stockItems.length) return
+
+      const now = new Date()
+      const criticalThreshold = 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
+      const warningThreshold = 30 * 24 * 60 * 60 * 1000 // 30 days in milliseconds
+
+      // Get items expiring soon
+      const expiringItems = stockItems.filter(item => {
+        const expiryDate = new Date(item.expiry_date)
+        const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+        return daysUntilExpiry >= 0 && daysUntilExpiry <= 30
+      })
+
+      if (expiringItems.length === 0) return
+
+      // Get users who should receive expiry warnings (branch admins, managers, system admins)
+      try {
+        const { data: branchUsers, error: usersError } = await supabase
+          .from('users_with_roles')
+          .select('user_id, name, phone, role')
+          .eq('branch_id', selectedBranch.id)
+          .in('role', ['branch_system_admin', 'branch_manager', 'system_admin'])
+
+        if (usersError) throw usersError
+
+        if (!branchUsers || branchUsers.length === 0) return
+
+        // Send warnings for critical items (expiring within 7 days)
+        const criticalItems = expiringItems.filter(item => {
+          const expiryDate = new Date(item.expiry_date)
+          const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+          return daysUntilExpiry <= 7
+        })
+
+        // Send warnings for items expiring within 30 days (if not already sent today)
+        const warningItems = expiringItems.filter(item => {
+          const expiryDate = new Date(item.expiry_date)
+          const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+          return daysUntilExpiry > 7 && daysUntilExpiry <= 30
+        })
+
+        // Check last warning time (prevent spamming)
+        const lastWarningKey = `expiry_warning_${selectedBranch.id}_${now.toDateString()}`
+        const lastWarningTime = localStorage.getItem(lastWarningKey)
+        const hoursSinceLastWarning = lastWarningTime 
+          ? (now.getTime() - parseInt(lastWarningTime)) / (1000 * 60 * 60)
+          : Infinity
+
+        // Send warnings once per day
+        if (hoursSinceLastWarning >= 24) {
+          for (const branchUser of branchUsers) {
+            if (!branchUser.phone) continue
+
+            // Format phone number to E.164 format
+            let phoneNumber = branchUser.phone.trim()
+            if (!phoneNumber.startsWith('+')) {
+              phoneNumber = '+' + phoneNumber.replace(/\D/g, '')
+            }
+
+            // Send critical expiry warnings
+            if (criticalItems.length > 0) {
+              const criticalList = criticalItems.slice(0, 10).map(item => 
+                `• ${item.product_name} - Expires in ${item.days_until_expiry} days (${format(new Date(item.expiry_date), 'MMM dd, yyyy')})`
+              ).join('\n')
+
+              const criticalMessage = `🚨 CRITICAL EXPIRY WARNING 🚨
+
+${criticalItems.length} item(s) expiring within 7 days:
+
+${criticalList}
+
+${criticalItems.length > 10 ? `... and ${criticalItems.length - 10} more items` : ''}
+
+⚠️ Please review and take action immediately!
+
+Branch: ${selectedBranch.name}`
+
+              await supabase.rpc('queue_whatsapp_notification', {
+                p_user_id: branchUser.user_id,
+                p_branch_id: selectedBranch.id,
+                p_recipient_phone: phoneNumber,
+                p_message_content: criticalMessage,
+                p_message_type: 'expiry_warning',
+                p_related_id: criticalItems[0].id,
+                p_related_type: 'stock_item',
+                p_metadata: {
+                  item_count: criticalItems.length,
+                  urgency: 'critical',
+                  days_until_expiry: Math.min(...criticalItems.map(i => i.days_until_expiry))
+                }
+              })
+            }
+
+            // Send general expiry warnings (30 days)
+            if (warningItems.length > 0 && criticalItems.length === 0) {
+              const warningList = warningItems.slice(0, 10).map(item => 
+                `• ${item.product_name} - Expires in ${item.days_until_expiry} days (${format(new Date(item.expiry_date), 'MMM dd, yyyy')})`
+              ).join('\n')
+
+              const warningMessage = `⚠️ EXPIRY WARNING ⚠️
+
+${warningItems.length} item(s) expiring within 30 days:
+
+${warningList}
+
+${warningItems.length > 10 ? `... and ${warningItems.length - 10} more items` : ''}
+
+Please review these items.
+
+Branch: ${selectedBranch.name}`
+
+              await supabase.rpc('queue_whatsapp_notification', {
+                p_user_id: branchUser.user_id,
+                p_branch_id: selectedBranch.id,
+                p_recipient_phone: phoneNumber,
+                p_message_content: warningMessage,
+                p_message_type: 'expiry_warning',
+                p_related_id: warningItems[0].id,
+                p_related_type: 'stock_item',
+                p_metadata: {
+                  item_count: warningItems.length,
+                  urgency: 'warning',
+                  days_until_expiry: Math.min(...warningItems.map(i => i.days_until_expiry))
+                }
+              })
+            }
+
+            // Trigger processing in background
+            supabase.functions.invoke('send-whatsapp', {
+              body: { process_pending: true }
+            }).catch(err => {
+              console.error('Background WhatsApp processing error:', err)
+            })
+          }
+
+          // Mark warning as sent today
+          localStorage.setItem(lastWarningKey, now.getTime().toString())
+        }
+      } catch (error) {
+        console.error('Error checking expiry warnings:', error)
+        // Don't show error to user - this is a background task
+      }
+    }
+
+    // Check immediately and then every 6 hours
+    checkExpiryWarnings()
+    const interval = setInterval(checkExpiryWarnings, 6 * 60 * 60 * 1000) // Check every 6 hours
+
+    return () => clearInterval(interval)
+  }, [stockItems, selectedBranch, user])
 
   const fetchStockItems = async () => {
+    // Don't fetch if no branch selected - ALL users need a selected branch
+    if (!selectedBranch) {
+      setStockItems([])
+      setTotalCount(0)
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     try {
       const from = page * pageSize
       const to = from + pageSize - 1
-      const { data, error, count } = await supabase
+      
+      let query = supabase
         .from('stock_items')
         .select('*', { count: 'exact' })
+      
+      // ✅ ALWAYS filter by selected branch
+      query = query.eq('branch_id', selectedBranch.id)
+      
+      const { data, error, count } = await query
         .order('expiry_date', { ascending: true })
         .range(from, to)
       if (error) throw error
@@ -323,6 +493,16 @@ const ExpiryManager = () => {
           <div>
             <h1 className="text-2xl font-bold">Expiry Management</h1>
             <p className="text-muted-foreground">Monitor and manage stock expiry</p>
+            {/* ✅ Branch Context Display */}
+            {selectedBranch && (
+              <div className="flex items-center gap-2 mt-2">
+                <Building2 className="h-4 w-4 text-blue-400" />
+                <Badge variant="outline" className="text-xs">
+                  {selectedBranch.name} ({selectedBranch.code})
+                  {selectedBranch.region && ` - ${selectedBranch.region}`}
+                </Badge>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-4">
             {expiredItems > 0 && (

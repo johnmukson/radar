@@ -13,25 +13,31 @@ import { supabase } from '@/integrations/supabase/client'
 import { format } from 'date-fns'
 import { AlertTriangle, Clock, Users, Package, MessageCircle, Scale, BarChart3, Eye, Calendar, Building2, DollarSign, AlertCircle } from 'lucide-react'
 import { isExpired } from '@/utils/expiryUtils'
+import { useBranch } from '@/contexts/BranchContext'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface StockItem {
   id: string
   product_name: string
-  branch: string
+  branch?: string | null
+  branch_id?: string | null // ✅ Add branch_id for filtering
   quantity: number
   unit_price: number
   is_emergency: boolean
   emergency_declared_at: string | null
   expiry_date: string
   risk_level?: string
+  [key: string]: any
 }
 
 interface Dispenser {
   id: string
   name: string
-  branch: string
+  branch: string | null
+  branch_id?: string // ✅ Add branch_id for filtering
   status: string
   whatsapp_number: string | null
+  [key: string]: any
 }
 
 interface EmergencyAssignment {
@@ -46,14 +52,16 @@ interface EmergencyAssignment {
   stock_item?: {
     id: string
     product_name: string
-    branch: string
+    branch?: string | null
+    branch_id?: string | null
   }
   dispenser?: {
     id: string
     name: string
-    branch: string
+    branch?: string | null
     whatsapp_number: string | null
   }
+  [key: string]: any
 }
 
 interface DispenserWorkload {
@@ -92,6 +100,8 @@ const groupLabels = {
 
 
 const EmergencyManager = () => {
+  const { selectedBranch, isSystemAdmin, isRegionalManager } = useBranch()
+  const { user } = useAuth() // ✅ Get current user for tracking
   const [stockItems, setStockItems] = useState<StockItem[]>([])
   const [dispensers, setDispensers] = useState<Dispenser[]>([])
   const [emergencyAssignments, setEmergencyAssignments] = useState<EmergencyAssignment[]>([])
@@ -118,26 +128,63 @@ const EmergencyManager = () => {
     above365: []
   };
 
-  // Memoize filtered dispensers to prevent unnecessary recalculations
+  // Memoize filtered dispensers by branch_id (more reliable than string matching)
   const filteredDispensers = useMemo(() => {
-    if (!selectedItem || !selectedItem.branch) return [];
+    if (!selectedItem || !selectedBranch) return [];
     
-    return dispensers.filter(d =>
-      d.branch && selectedItem.branch &&
-      d.branch.trim().toLowerCase() === selectedItem.branch.trim().toLowerCase()
-    );
-  }, [dispensers, selectedItem]);
+    // Filter dispensers by branch_id from selectedBranch
+    return dispensers.filter(d => {
+      // Check if dispenser has branch_id that matches selectedBranch
+      // This is more reliable than string matching
+      if (selectedItem.branch_id && d.branch_id) {
+        return d.branch_id === selectedItem.branch_id
+      }
+      // Fallback to string matching if branch_id not available
+      return d.branch && selectedItem.branch &&
+        d.branch.trim().toLowerCase() === selectedItem.branch.trim().toLowerCase()
+    });
+  }, [dispensers, selectedItem, selectedBranch]);
 
   const fetchData = useCallback(async () => {
+    // Don't fetch if no branch selected - ALL users need a selected branch
+    if (!selectedBranch) {
+      setStockItems([])
+      setDispensers([])
+      setEmergencyAssignments([])
+      setLoading(false)
+      return
+    }
+
     try {
+      // Build stock items query
+      // ✅ ALWAYS filter by selected branch - system admins/regional managers should see selected branch data
+      // They can switch branches to see other branches, but should see one branch at a time
+      let stockQuery = supabase.from('stock_items').select('*')
+      stockQuery = stockQuery.eq('branch_id', selectedBranch.id)
+      console.log('EmergencyManager: Filtering stock items by branch_id:', selectedBranch.id, 'Branch:', selectedBranch.name);
+
+      // Build dispensers query - filter by branch
+      // ✅ ALWAYS filter by selected branch
+      let dispensersQuery = supabase.from('users_with_roles')
+        .select('user_id, name, phone, branch_id, branch_name')
+        .eq('role', 'dispenser')
+        .eq('branch_id', selectedBranch.id)
+      console.log('EmergencyManager: Filtering dispensers by branch_id:', selectedBranch.id);
+
+      // Build emergency assignments query - filter by branch via stock_items
+      let assignmentsQuery = supabase.from('emergency_assignments').select(`
+        *,
+        stock_item:stock_items(id, product_name, branch_id),
+        dispenser:users!dispenser_id(id, name, phone)
+      `)
+      // Filter assignments by branch through stock_items join
+      // Note: This filtering happens at application level after fetch
+      // RLS policies will also enforce branch isolation
+
       const [stockResponse, dispensersResponse, assignmentsResponse] = await Promise.all([
-              supabase.from('stock_items').select('*').order('created_at', { ascending: false }),
-      supabase.from('users_with_roles').select('user_id, name, phone, branch_id, branch_name').eq('role', 'dispenser'),
-        supabase.from('emergency_assignments').select(`
-          *,
-          stock_item:stock_items(id, product_name, branch_id),
-          dispenser:users!dispenser_id(id, name, phone)
-        `).order('assigned_at', { ascending: false })
+        stockQuery.order('created_at', { ascending: false }),
+        dispensersQuery,
+        assignmentsQuery.order('assigned_at', { ascending: false })
       ])
 
       if (stockResponse.error) throw stockResponse.error
@@ -145,7 +192,8 @@ const EmergencyManager = () => {
       if (assignmentsResponse.error) throw assignmentsResponse.error
 
       // Calculate risk levels for stock items (UNIFORM RANGES)
-      const itemsWithRisk = (stockResponse.data || []).map(item => {
+      const rawStockItems = (stockResponse.data || []) as any[]
+      const itemsWithRisk = rawStockItems.map((item: any) => {
         const daysToExpiry = Math.ceil((new Date(item.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
         let risk_level = 'very-low'
         
@@ -157,8 +205,15 @@ const EmergencyManager = () => {
         else if (daysToExpiry <= 180) risk_level = 'medium'       // 121-180 days (Medium priority range)
         else if (daysToExpiry <= 365) risk_level = 'low'          // 181-365 days (Low priority range)
         else risk_level = 'very-low'                               // 365+ days (Very low priority range)
-        
-        return { ...item, risk_level }
+
+        const branchName = item.branch ?? item.branch_name ?? selectedBranch?.name ?? null
+
+        return {
+          ...item,
+          branch: branchName,
+          branch_id: item.branch_id ?? selectedBranch?.id ?? null,
+          risk_level
+        } as StockItem
       })
 
       // IMMUTABLE LAW: Exclude expired items from emergency assignments
@@ -166,19 +221,52 @@ const EmergencyManager = () => {
       const nonExpiredItems = itemsWithRisk.filter(item => !isExpired(item.expiry_date))
 
       setStockItems(nonExpiredItems)
-      const mappedDispensers = (dispensersResponse.data || []).map(d => ({
-        id: d.user_id,
-        name: d.name,
-        phone: d.phone,
-        status: 'active',
-        branch: d.branch_name || d.branch_id, // Ensure branch is available
-        whatsapp_number: d.phone // Use phone as whatsapp number
-      }))
+
+      const rawDispensers = (dispensersResponse.data || []) as any[]
+      const mappedDispensers: Dispenser[] = rawDispensers
+        .filter((d: any): d is { user_id: string; name?: string | null; phone?: string | null; branch_id?: string | null; branch_name?: string | null } => d && typeof d === 'object' && 'user_id' in d)
+        .map(d => ({
+          id: d.user_id,
+          name: d.name ?? 'Unknown',
+          phone: d.phone ?? '',
+          status: 'active',
+          branch: d.branch_name ?? selectedBranch?.name ?? 'Unknown Branch',
+          branch_id: d.branch_id ?? null,
+          whatsapp_number: d.phone ?? null
+        }))
       setDispensers(mappedDispensers)
-      setEmergencyAssignments(assignmentsResponse.data || [])
+      
+      // ✅ ALWAYS filter emergency assignments by selected branch
+      const rawAssignments = (assignmentsResponse.data || []) as any[]
+      const filteredAssignments = rawAssignments
+        .filter((assignment: any) => assignment && typeof assignment === 'object' && !('message' in assignment))
+        .filter((assignment: any) => assignment?.stock_item?.branch_id === selectedBranch.id)
+        .map((assignment: any) => {
+          const stockItem = assignment.stock_item ?? {}
+          const dispenser = assignment.dispenser ?? {}
+          const mappedDispenser = mappedDispensers.find(d => d.id === dispenser.id)
+
+          return {
+            ...assignment,
+            stock_item: {
+              ...stockItem,
+              branch: stockItem.branch ?? selectedBranch?.name ?? 'Unknown Branch',
+              branch_id: stockItem.branch_id ?? selectedBranch?.id ?? null
+            },
+            dispenser: dispenser
+              ? {
+                  ...dispenser,
+                  branch: mappedDispenser?.branch ?? selectedBranch?.name ?? 'Unknown Branch',
+                  whatsapp_number: dispenser.phone ?? mappedDispenser?.whatsapp_number ?? null
+                }
+              : undefined
+          } as EmergencyAssignment
+        })
+      console.log('EmergencyManager: Filtered assignments for branch:', selectedBranch.id, 'Count:', filteredAssignments.length);
+      setEmergencyAssignments(filteredAssignments)
 
       // Calculate workloads
-      await calculateDispenserWorkloads(mappedDispensers, assignmentsResponse.data || [])
+      await calculateDispenserWorkloads(mappedDispensers, filteredAssignments)
     } catch (error: unknown) {
       // Better error message extraction
       let errorMessage = "Failed to fetch data"
@@ -205,11 +293,53 @@ const EmergencyManager = () => {
     } finally {
       setLoading(false)
     }
-  }, [toast])
+  }, [toast, selectedBranch, isSystemAdmin, isRegionalManager]) // Re-fetch when branch changes
 
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  // Check for deadline reminders periodically
+  useEffect(() => {
+    const checkDeadlineReminders = async () => {
+      if (!selectedBranch || !emergencyAssignments.length) return
+
+      const now = new Date()
+      const reminderThreshold = 24 * 60 * 60 * 1000 // 24 hours before deadline
+
+      for (const assignment of emergencyAssignments) {
+        if (assignment.status !== 'pending') continue
+
+        const deadline = new Date(assignment.deadline)
+        const timeUntilDeadline = deadline.getTime() - now.getTime()
+
+        // Send reminder if deadline is within 24 hours and we haven't sent one recently
+        if (timeUntilDeadline > 0 && timeUntilDeadline <= reminderThreshold) {
+          const dispenser = dispensers.find(d => d.id === assignment.dispenser_id)
+          if (dispenser) {
+            // Check if we've already sent a reminder recently (within last 12 hours)
+            // This is a simple check - in production you might want to track this in the database
+            const lastReminderKey = `deadline_reminder_${assignment.id}`
+            const lastReminderTime = localStorage.getItem(lastReminderKey)
+            const hoursSinceLastReminder = lastReminderTime 
+              ? (now.getTime() - parseInt(lastReminderTime)) / (1000 * 60 * 60)
+              : Infinity
+
+            if (hoursSinceLastReminder >= 12) {
+              await sendWhatsAppNotification(assignment, dispenser, 'deadline_reminder')
+              localStorage.setItem(lastReminderKey, now.getTime().toString())
+            }
+          }
+        }
+      }
+    }
+
+    // Check immediately and then every hour
+    checkDeadlineReminders()
+    const interval = setInterval(checkDeadlineReminders, 60 * 60 * 1000) // Check every hour
+
+    return () => clearInterval(interval)
+  }, [emergencyAssignments, dispensers, selectedBranch])
 
   const calculateDispenserWorkloads = async (dispensers: Dispenser[], assignments: EmergencyAssignment[]) => {
     const workloads: DispenserWorkload[] = dispensers.map(dispenser => {
@@ -318,13 +448,22 @@ const EmergencyManager = () => {
     setShowFairAssignDialog(true)
   }
 
-  const sendWhatsAppNotification = async (assignment: EmergencyAssignment, dispenser: Dispenser) => {
-    if (!dispenser.whatsapp_number) return
+  const sendWhatsAppNotification = async (assignment: EmergencyAssignment, dispenser: Dispenser, messageType: 'emergency_assignment' | 'assignment_completed' | 'assignment_cancelled' | 'deadline_reminder' = 'emergency_assignment') => {
+    if (!dispenser.whatsapp_number || !selectedBranch || !dispenser.id) return
 
-    const message = `🚨 EMERGENCY STOCK ASSIGNMENT 🚨
+    // Format phone number to E.164 format (add + if missing)
+    let phoneNumber = dispenser.whatsapp_number.trim()
+    if (!phoneNumber.startsWith('+')) {
+      // If no country code, assume default (you may want to handle this differently)
+      phoneNumber = '+' + phoneNumber.replace(/\D/g, '')
+    }
+
+    let message = ''
+    if (messageType === 'emergency_assignment') {
+      message = `🚨 EMERGENCY STOCK ASSIGNMENT 🚨
 
 📦 Product: ${assignment.stock_item?.product_name}
-🏢 From Branch: ${assignment.stock_item?.branch}
+🏢 From Branch: ${assignment.stock_item?.branch || selectedBranch.name}
 📊 Quantity Assigned: ${assignment.assigned_quantity} units
 ⏰ Deadline: ${format(new Date(assignment.deadline), 'MMM dd, yyyy HH:mm')}
 
@@ -333,51 +472,105 @@ const EmergencyManager = () => {
 ${assignment.notes ? `📝 Additional Notes: ${assignment.notes}` : ''}
 
 Contact your supervisor immediately if you cannot complete this assignment on time.`
+    } else if (messageType === 'assignment_completed') {
+      message = `✅ ASSIGNMENT COMPLETED ✅
+
+📦 Product: ${assignment.stock_item?.product_name}
+📊 Quantity Completed: ${assignment.assigned_quantity} units
+
+Thank you for completing this assignment on time!`
+    } else if (messageType === 'assignment_cancelled') {
+      message = `❌ ASSIGNMENT CANCELLED ❌
+
+📦 Product: ${assignment.stock_item?.product_name}
+📊 Quantity: ${assignment.assigned_quantity} units
+
+This assignment has been cancelled. No action required.`
+    } else if (messageType === 'deadline_reminder') {
+      const deadline = new Date(assignment.deadline)
+      const now = new Date()
+      const hoursUntilDeadline = Math.ceil((deadline.getTime() - now.getTime()) / (1000 * 60 * 60))
+      
+      message = `⏰ DEADLINE REMINDER ⏰
+
+📦 Product: ${assignment.stock_item?.product_name}
+📊 Quantity: ${assignment.assigned_quantity} units
+⏰ Deadline: ${format(deadline, 'MMM dd, yyyy HH:mm')}
+🕐 Time Remaining: ${hoursUntilDeadline} hours
+
+⚠️ This assignment deadline is approaching. Please complete it soon!`
+    }
 
     try {
-      const { error } = await supabase.functions.invoke('send-whatsapp', {
-        body: {
-          to: dispenser.whatsapp_number,
-          message,
-          messageType: 'emergency_assignment',
-          relatedId: assignment.id
+      // Use queue_whatsapp_notification RPC to queue the notification
+      const { data: notificationId, error } = await (supabase as any).rpc('queue_whatsapp_notification', {
+        p_user_id: dispenser.id, // dispenser.id is the user_id
+        p_branch_id: selectedBranch.id,
+        p_recipient_phone: phoneNumber,
+        p_message_content: message,
+        p_message_type: messageType,
+        p_related_id: assignment.id,
+        p_related_type: 'emergency_assignment',
+        p_metadata: {
+          assignment_id: assignment.id,
+          dispenser_name: dispenser.name,
+          product_name: assignment.stock_item?.product_name,
+          quantity: assignment.assigned_quantity
         }
       })
 
       if (error) throw error
-      
-      // console.log('WhatsApp notification sent successfully to', dispenser.whatsapp_number)
+
+      // Optionally trigger processing of pending notifications (or let cron job handle it)
+      // We can do this in the background without waiting
+      if (notificationId) {
+        // Trigger processing in background (don't wait for it)
+        supabase.functions.invoke('send-whatsapp', {
+          body: { process_pending: true }
+        }).catch(err => {
+          console.error('Background WhatsApp processing error:', err)
+          // Don't show error to user, cron job will handle it
+        })
+      }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.error('Error sending WhatsApp notification:', message)
-      toast({
-        title: "WhatsApp Error",
-        description: `Assignment created but WhatsApp notification to ${dispenser.name} failed`,
-        variant: "destructive",
-      })
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error('Error queueing WhatsApp notification:', errorMessage)
+      // Don't show error toast - assignment is created, notification is optional
+      // The notification will be retried later
     }
   }
 
   const declareEmergency = async (item: StockItem) => {
+    if (!user?.id) {
+      toast({
+        title: "Error",
+        description: "User not authenticated. Please log in again.",
+        variant: "destructive",
+      })
+      return
+    }
+
     try {
+      // ✅ Set emergency_declared_by when declaring emergency
       const { error } = await supabase
         .from('stock_items')
         .update({
           is_emergency: true,
-          emergency_declared_at: new Date().toISOString()
+          emergency_declared_at: new Date().toISOString(),
+          emergency_declared_by: user.id // ✅ Track who declared the emergency
         })
         .eq('id', item.id)
 
       if (error) throw error
 
-      // Record movement in history
+      // ✅ Record movement in history with moved_by tracking
       await supabase.from('stock_movement_history').insert({
         stock_item_id: item.id,
         movement_type: 'emergency_declared',
         quantity_moved: 0,
-        from_branch_id: null,
+        from_branch_id: item.branch_id || null, // ✅ Use item's branch_id
         notes: `Emergency declared for ${item.product_name}`,
-        moved_by: null
+        moved_by: user.id // ✅ Track who declared the emergency
       })
 
       setSelectedItem({ ...item, is_emergency: true })
@@ -434,6 +627,43 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
       return
     }
 
+    // ✅ QUANTITY VALIDATION: Prevent over-assignment
+    const totalAssignedQuantity = Object.values(dispenserAssignments).reduce((sum, qty) => sum + qty, 0)
+    if (totalAssignedQuantity > selectedItem.quantity) {
+      toast({
+        title: "Over-Assignment Error",
+        description: `Cannot assign ${totalAssignedQuantity} units. Only ${selectedItem.quantity} units available.`,
+        variant: "destructive",
+      })
+      return
+    }
+
+    // ✅ DISPENSER BRANCH VALIDATION: Ensure dispensers are in the correct branch
+    const invalidDispensers: string[] = []
+    for (const [dispenserId, quantity] of Object.entries(dispenserAssignments)) {
+      if (quantity <= 0) continue
+      
+      const dispenser = dispensers.find(d => d.id === dispenserId)
+      if (!dispenser) {
+        invalidDispensers.push(`Dispenser ${dispenserId}`)
+        continue
+      }
+
+      // Check if dispenser belongs to the same branch as the stock item
+      if (dispenser.branch_id !== selectedItem.branch_id) {
+        invalidDispensers.push(dispenser.name || dispenserId)
+      }
+    }
+
+    if (invalidDispensers.length > 0) {
+      toast({
+        title: "Branch Mismatch Error",
+        description: `The following dispensers are not assigned to this branch: ${invalidDispensers.join(', ')}`,
+        variant: "destructive",
+      })
+      return
+    }
+
     const assignments = Object.entries(dispenserAssignments)
       .filter(([_, quantity]) => quantity > 0)
       .map(([dispenserId, quantity]) => ({
@@ -458,12 +688,19 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
     }
 
     try {
-      // Get current user for assignment tracking
-      const { data: { user } } = await supabase.auth.getUser()
+      // ✅ Use user from useAuth hook (already available)
+      if (!user?.id) {
+        toast({
+          title: "Error",
+          description: "User not authenticated. Please log in again.",
+          variant: "destructive",
+        })
+        return
+      }
       
       const assignmentsWithUser = assignments.map(assignment => ({
         ...assignment,
-        assigned_by: user?.id
+        assigned_by: user.id // ✅ Track who created the assignment
       }))
 
       const { data: createdAssignments, error } = await supabase
@@ -477,24 +714,56 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
 
       if (error) throw error
 
+      const normalizedAssignments: EmergencyAssignment[] = (createdAssignments ?? []).map((assignment: any) => {
+        const stockItem = assignment?.stock_item ?? {}
+        const dispenserData = assignment?.dispenser
+        const fallbackDispenser = dispensers.find(d => d.id === assignment?.dispenser_id)
+
+        const normalizedDispenser = dispenserData && typeof dispenserData === 'object' && 'id' in dispenserData
+          ? {
+              id: dispenserData.id,
+              name: dispenserData.name ?? fallbackDispenser?.name ?? 'Unknown',
+              branch: fallbackDispenser?.branch ?? selectedBranch?.name ?? 'Unknown Branch',
+              whatsapp_number: dispenserData.phone ?? fallbackDispenser?.whatsapp_number ?? null
+            }
+          : fallbackDispenser
+            ? {
+                id: fallbackDispenser.id,
+                name: fallbackDispenser.name ?? 'Unknown',
+                branch: fallbackDispenser.branch ?? selectedBranch?.name ?? 'Unknown Branch',
+                whatsapp_number: fallbackDispenser.whatsapp_number ?? null
+              }
+            : undefined
+
+        return {
+          ...assignment,
+          stock_item: {
+            ...stockItem,
+            branch: stockItem?.branch ?? selectedItem.branch ?? selectedBranch?.name ?? 'Unknown Branch',
+            branch_id: stockItem?.branch_id ?? selectedItem.branch_id ?? selectedBranch?.id ?? null
+          },
+          dispenser: normalizedDispenser
+        } as EmergencyAssignment
+      })
+
       // Send WhatsApp notifications and record movement history
-      for (const assignment of createdAssignments) {
+      for (const assignment of normalizedAssignments) {
         const dispenser = dispensers.find(d => d.id === assignment.dispenser_id)
         
         if (dispenser) {
-          // Send WhatsApp notification
-          await sendWhatsAppNotification(assignment, dispenser)
+          // Queue WhatsApp notification using RPC
+          await sendWhatsAppNotification(assignment, dispenser, 'emergency_assignment')
           
-          // Record movement in history
+          // ✅ Record movement in history with moved_by tracking
           await supabase.from('stock_movement_history').insert({
             stock_item_id: selectedItem.id,
             movement_type: 'emergency_assigned',
             quantity_moved: assignment.assigned_quantity,
-            from_branch_id: null,
+            from_branch_id: selectedItem.branch_id || null, // ✅ Use item's branch_id
             to_branch_id: null,
             for_dispenser: assignment.dispenser_id,
             notes: `Emergency assignment: ${assignment.assigned_quantity} units assigned to ${dispenser.name}`,
-            moved_by: null
+            moved_by: user?.id || null // ✅ Track who made the assignment
           })
         }
       }
@@ -532,6 +801,14 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        toast({
+          title: "Authentication Required",
+          description: "You must be logged in to create equitable assignments.",
+          variant: "destructive",
+        })
+        return
+      }
       const emergencyItems = stockItems.filter(item => item.is_emergency)
       
       // IMMUTABLE LAW: Exclude expired items from assignments
@@ -561,16 +838,27 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
         assigned_quantity: number;
         deadline: string;
         notes: string;
-        assigned_by?: string;
+        assigned_by: string;
       }> = []
+
+      // ✅ DISPENSER BRANCH VALIDATION: Filter dispensers to only those in selected branch
+      const branchDispensers = dispensers.filter(d => d.branch_id === selectedBranch?.id)
+      if (branchDispensers.length === 0) {
+        toast({
+          title: "No Dispensers Available",
+          description: "No dispensers found for the selected branch.",
+          variant: "destructive",
+        })
+        return
+      }
 
       // Create assignments for each risk category, prioritizing least burdened dispensers
       for (const riskLevel of riskLevels) {
         const items = itemsByRisk[riskLevel as keyof typeof itemsByRisk]
         if (items.length === 0) continue
 
-        // Sort dispensers by current workload for this risk level
-        const sortedDispensers = [...dispensers].sort((a, b) => {
+        // Sort dispensers by current workload for this risk level (only branch dispensers)
+        const sortedDispensers = [...branchDispensers].sort((a, b) => {
           const workloadA = dispenserWorkloads.find(w => w.dispenser_id === a.id)?.workload_score || 0
           const workloadB = dispenserWorkloads.find(w => w.dispenser_id === b.id)?.workload_score || 0
           return workloadA - workloadB
@@ -581,12 +869,18 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
         for (const item of items) {
           let remainingQuantity = item.quantity
           
+          // ✅ QUANTITY VALIDATION: Track total assigned per item
+          let totalAssignedForItem = 0
+          
           while (remainingQuantity > 0 && dispenserIndex < sortedDispensers.length) {
             const dispenser = sortedDispensers[dispenserIndex]
             const targetQuantity = fairAssignments[dispenser.id]?.[riskLevel] || 0
             
             if (targetQuantity > 0) {
-              const assignQuantity = Math.min(remainingQuantity, targetQuantity)
+              // ✅ QUANTITY VALIDATION: Ensure we don't exceed item quantity
+              const assignQuantity = Math.min(remainingQuantity, targetQuantity, item.quantity - totalAssignedForItem)
+              
+              if (assignQuantity <= 0) break // No more can be assigned
               
               allAssignments.push({
                 stock_item_id: item.id,
@@ -594,10 +888,11 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
                 assigned_quantity: assignQuantity,
                 deadline: new Date(deadline).toISOString(),
                 notes: `Equitable fair distribution - ${riskLevel} risk category (workload-balanced)`,
-                assigned_by: user?.id
+                assigned_by: user.id
               })
               
               remainingQuantity -= assignQuantity
+              totalAssignedForItem += assignQuantity
               fairAssignments[dispenser.id][riskLevel] -= assignQuantity
             }
             
@@ -626,23 +921,56 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
 
       if (error) throw error
 
+      const normalizedAssignments: EmergencyAssignment[] = (createdAssignments ?? []).map((assignment: any) => {
+        const stockItem = assignment?.stock_item ?? {}
+        const dispenserData = assignment?.dispenser
+        const fallbackDispenser = branchDispensers.find(d => d.id === assignment?.dispenser_id) || dispensers.find(d => d.id === assignment?.dispenser_id)
+
+        const normalizedDispenser = dispenserData && typeof dispenserData === 'object' && 'id' in dispenserData
+          ? {
+              id: dispenserData.id,
+              name: dispenserData.name ?? fallbackDispenser?.name ?? 'Unknown',
+              branch: fallbackDispenser?.branch ?? selectedBranch?.name ?? 'Unknown Branch',
+              whatsapp_number: dispenserData.phone ?? fallbackDispenser?.whatsapp_number ?? null
+            }
+          : fallbackDispenser
+            ? {
+                id: fallbackDispenser.id,
+                name: fallbackDispenser.name ?? 'Unknown',
+                branch: fallbackDispenser.branch ?? selectedBranch?.name ?? 'Unknown Branch',
+                whatsapp_number: fallbackDispenser.whatsapp_number ?? null
+              }
+            : undefined
+
+        return {
+          ...assignment,
+          stock_item: {
+            ...stockItem,
+            branch: stockItem?.branch ?? selectedBranch?.name ?? 'Unknown Branch',
+            branch_id: stockItem?.branch_id ?? selectedBranch?.id ?? null
+          },
+          dispenser: normalizedDispenser
+        } as EmergencyAssignment
+      })
+
       // Send notifications and record history
-      for (const assignment of createdAssignments) {
+      for (const assignment of normalizedAssignments) {
         const dispenser = dispensers.find(d => d.id === assignment.dispenser_id)
         const item = emergencyItems.find(i => i.id === assignment.stock_item_id)
         
         if (dispenser && item) {
-          await sendWhatsAppNotification(assignment, dispenser)
+          // Queue WhatsApp notification using RPC
+          await sendWhatsAppNotification(assignment, dispenser, 'emergency_assignment')
           
           await supabase.from('stock_movement_history').insert({
             stock_item_id: item.id,
             movement_type: 'emergency_assigned',
             quantity_moved: assignment.assigned_quantity,
-            from_branch_id: null,
+            from_branch_id: item.branch_id || null, // ✅ Use item's branch_id
             to_branch_id: null,
             for_dispenser: assignment.dispenser_id,
             notes: `Equitable fair distribution: ${assignment.assigned_quantity} units assigned to ${dispenser.name} (${item.risk_level} risk, workload-balanced)`,
-            moved_by: null
+            moved_by: user?.id || null // ✅ Track who made the assignment
           })
         }
       }
@@ -673,12 +1001,27 @@ Contact your supervisor immediately if you cannot complete this assignment on ti
         updateData.completed_at = new Date().toISOString()
       }
 
+      // Get assignment details before update
+      const assignment = emergencyAssignments.find(a => a.id === assignmentId)
+      
       const { error } = await supabase
         .from('emergency_assignments')
         .update(updateData)
         .eq('id', assignmentId)
 
       if (error) throw error
+
+      // Send WhatsApp notification for status change
+      if (assignment) {
+        const dispenser = dispensers.find(d => d.id === assignment.dispenser_id)
+        if (dispenser) {
+          if (status === 'completed') {
+            await sendWhatsAppNotification(assignment, dispenser, 'assignment_completed')
+          } else if (status === 'cancelled') {
+            await sendWhatsAppNotification(assignment, dispenser, 'assignment_cancelled')
+          }
+        }
+      }
 
       fetchData()
       toast({

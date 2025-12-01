@@ -26,6 +26,7 @@ import { useStockAdjuster } from '@/contexts/StockAdjusterContext'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ChevronsUpDown } from 'lucide-react'
 import { useUserRole } from '@/hooks/useUserRole'
+import { useBranch } from '@/contexts/BranchContext'
 
 interface StockItem {
   id: string
@@ -45,6 +46,7 @@ interface StockItem {
 console.log('StockList component mounted'); // Debug: component mount
 
 const StockList = () => {
+  const { selectedBranch, isSystemAdmin, isRegionalManager } = useBranch()
   const [stockItems, setStockItems] = useState<StockItem[]>([])
   const [loading, setLoading] = useState(true)
   const { hasAdminAccess } = useUserRole()
@@ -58,11 +60,27 @@ const StockList = () => {
   const [adjustLoading, setAdjustLoading] = useState(false)
 
   const fetchStockItems = async () => {
-    console.log('fetchStockItems called'); // Debug: fetch function called
+    console.log('fetchStockItems called, selectedBranch:', selectedBranch?.id, selectedBranch?.name); // Debug: fetch function called
+    
+    // Don't fetch if no branch selected - ALL users need a selected branch
+    if (!selectedBranch) {
+      console.log('No branch selected, clearing stock items');
+      setStockItems([])
+      setLoading(false)
+      return
+    }
+
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('stock_items')
         .select('*')
+      
+      // ✅ ALWAYS filter by selected branch - system admins/regional managers should see selected branch data
+      // They can switch branches to see other branches, but should see one branch at a time
+      query = query.eq('branch_id', selectedBranch.id)
+      console.log('Filtering stock items by branch_id:', selectedBranch.id, 'Branch:', selectedBranch.name);
+      
+      const { data, error } = await query
         .order('is_emergency', { ascending: false })
         .order('created_at', { ascending: false })
 
@@ -102,9 +120,9 @@ const StockList = () => {
   }
 
   useEffect(() => {
-    console.log('useEffect running');
+    console.log('useEffect running, selectedBranch:', selectedBranch?.id);
     fetchStockItems()
-  }, [])
+  }, [selectedBranch, isSystemAdmin, isRegionalManager]) // ✅ Re-fetch when branch changes
 
   const calculateRiskLevel = (expiryDate: string) => {
     const today = new Date()

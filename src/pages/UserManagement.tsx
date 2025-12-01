@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUserRole } from '@/hooks/useUserRole'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { UserPlus, Users, Crown, Settings, Shield, User, MoreHorizontal, RefreshCw, Trash2 } from 'lucide-react'
+import { UserPlus, Users, Crown, Settings, Shield, User, MoreHorizontal, RefreshCw, Trash2, Building2, ChevronDown, ChevronRight } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,6 +19,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from '@/hooks/use-toast'
 import { supabase } from '@/integrations/supabase/client'
@@ -35,17 +40,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useNavigate } from 'react-router-dom'
 import UserCreation from '@/components/UserCreation'
 import { extractErrorMessage } from '@/lib/utils'
+import { useBranch } from '@/contexts/BranchContext'
 
 type AppRole = Database['public']['Enums']['app_role']
+
+interface UserRoleBranch {
+  role: AppRole;
+  branch_id: string | null;
+  branch_name: string | null;
+  branch_code: string | null;
+}
 
 interface UserWithRole {
   id: string;
   email: string;
   name: string;
   status: string;
-  role?: AppRole;
-  branch_id?: string | null;
-  branch_name?: string | null;
+  roles: UserRoleBranch[]; // ✅ Multiple roles/branches per user
   phone?: string | null;
 }
 
@@ -58,11 +69,18 @@ interface Branch {
 
 const UserManagement = () => {
   const { user } = useAuth()
-  const { hasAdminAccess } = useUserRole()
+  const { hasAdminAccess, isSystemAdmin: userIsSystemAdmin, isBranchSystemAdmin } = useUserRole()
+  const { selectedBranch, isSystemAdmin, isRegionalManager } = useBranch() // ✅ Add branch context
   const [users, setUsers] = useState<UserWithRole[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const { toast } = useToast()
+  const [branchFilter, setBranchFilter] = useState<string>('all') // ✅ Add branch filter
+  
+  // ✅ Determine if current user is system admin (only one who sees all users)
+  const canSeeAllUsers = userIsSystemAdmin
+  // ✅ Determine if current user can manage roles (system admin or branch admin for their branch)
+  const canManageRoles = userIsSystemAdmin || (isBranchSystemAdmin && selectedBranch)
   
   const [showAssignRoleDialog, setShowAssignRoleDialog] = useState(false)
   const [selectedUserForRole, setSelectedUserForRole] = useState<UserWithRole | null>(null)
@@ -75,6 +93,7 @@ const UserManagement = () => {
   const [editPhone, setEditPhone] = useState('')
 
   const [showCreateUserDialog, setShowCreateUserDialog] = useState(false)
+  const [expandedBranches, setExpandedBranches] = useState<Set<string>>(new Set()) // ✅ Track expanded branches
 
   const navigate = useNavigate();
 
@@ -85,17 +104,16 @@ const UserManagement = () => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (hasAdminAccess) {
+    if (hasAdminAccess || canManageRoles) {
       loadInitialData()
     } else {
       setLoading(false)
     }
-  }, [hasAdminAccess, loadInitialData])
+  }, [hasAdminAccess, canManageRoles, loadInitialData, selectedBranch]) // ✅ Re-load when branch changes
 
   const loadUsers = async () => {
     try {
-      // Use a more reliable query that includes all users
-      const { data, error } = await supabase
+      let query = supabase
         .from('users')
         .select(`
           id,
@@ -103,36 +121,54 @@ const UserManagement = () => {
           name,
           phone,
           status,
-          user_roles(role, branch_id, branches(name, code))
+          user_roles(
+            role,
+            branch_id,
+            branches(id, name, code, region)
+          )
         `)
         .order('name');
+      
+      // ✅ If not system admin, filter users by selected branch
+      if (!canSeeAllUsers && selectedBranch) {
+        // Filter users who have roles in the selected branch
+        // This is done at application level after fetch due to Supabase query limitations
+      }
+      
+      const { data, error } = await query;
       if (error) throw error
       
-      console.log('Loaded users:', data);
+      console.log('Loaded users with roles:', data);
       
-      // Transform the data to match the expected format
-      const transformedUsers = data?.map(user => {
-        const userRole = user.user_roles?.[0];
-        const branch = userRole?.branches?.[0];
+      // ✅ Transform to show ALL roles/branches per user
+      let transformedUsers: UserWithRole[] = (data || []).map((user: any) => {
+        // Get all roles with their branches
+        const userRoles = Array.isArray(user.user_roles) ? user.user_roles : [];
+        const roles: UserRoleBranch[] = userRoles.map((ur: any) => ({
+          role: ur.role,
+          branch_id: ur.branch_id,
+          branch_name: ur.branches?.name || null,
+          branch_code: ur.branches?.code || null
+        }));
+        
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           phone: user.phone,
           status: user.status,
-          role: userRole?.role || null,
-          branch_id: userRole?.branch_id || null,
-          branch_name: branch?.name || null
+          roles: roles // ✅ All roles/branches
         };
       }) || [];
       
-      console.log('Transformed users:', transformedUsers);
-      
-      // Check for users with null IDs
-      const usersWithNullIds = transformedUsers.filter(user => !user.id);
-      if (usersWithNullIds.length > 0) {
-        console.warn('Found users with null IDs:', usersWithNullIds);
+      // ✅ Filter by selected branch if not system admin
+      if (!canSeeAllUsers && selectedBranch) {
+        transformedUsers = transformedUsers.filter(user => 
+          user.roles.some(r => r.branch_id === selectedBranch.id)
+        );
       }
+      
+      console.log('Transformed users with all roles:', transformedUsers);
       
       setUsers(transformedUsers)
     } catch (error: unknown) {
@@ -170,6 +206,19 @@ const UserManagement = () => {
       toast({ title: "Error", description: "Branch is required for this role.", variant: "destructive" });
       return;
     }
+
+    // ✅ Branch-scoped validation: Branch admins can only assign roles within their branch
+    if (!canSeeAllUsers && isBranchSystemAdmin && selectedBranch) {
+      if (branchForRole !== selectedBranch.id) {
+        toast({ 
+          title: "Error", 
+          description: `You can only assign roles within your branch (${selectedBranch.name}).`, 
+          variant: "destructive" 
+        });
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       console.log('Assigning role:', {
@@ -203,16 +252,31 @@ const UserManagement = () => {
         throw userError;
       }
 
-      // Then assign the role
-      // First, remove any existing roles for this user
-      const { error: deleteError } = await supabase
-        .from('user_roles')
-        .delete()
-        .eq('user_id', selectedUserForRole.id);
+      // ✅ For branch admins: Only remove roles for the current branch, keep others
+      // ✅ For system admins: Remove all roles (existing behavior)
+      if (canSeeAllUsers) {
+        // System admin: Remove all existing roles
+        const { error: deleteError } = await supabase
+          .from('user_roles')
+          .delete()
+          .eq('user_id', selectedUserForRole.id);
 
-      if (deleteError) {
-        console.error('Error deleting existing roles:', deleteError);
-        throw deleteError;
+        if (deleteError) {
+          console.error('Error deleting existing roles:', deleteError);
+          throw deleteError;
+        }
+      } else if (isBranchSystemAdmin && selectedBranch) {
+        // Branch admin: Only remove roles for this branch
+        const { error: deleteError } = await supabase
+          .from('user_roles')
+          .delete()
+          .eq('user_id', selectedUserForRole.id)
+          .eq('branch_id', selectedBranch.id);
+
+        if (deleteError) {
+          console.error('Error deleting branch roles:', deleteError);
+          throw deleteError;
+        }
       }
 
       // Then insert the new role
@@ -255,8 +319,17 @@ const UserManagement = () => {
 
   const openAssignRoleDialog = (user: UserWithRole) => {
     setSelectedUserForRole(user);
-    setRoleToAssign(user.role || 'dispenser');
-    setBranchForRole(user.branch_id || '');
+    // Get the first role or default to dispenser
+    const firstRole = user.roles?.[0];
+    setRoleToAssign(firstRole?.role || 'dispenser');
+    
+    // ✅ For branch admins, always use their selected branch
+    if (!canSeeAllUsers && isBranchSystemAdmin && selectedBranch) {
+      setBranchForRole(selectedBranch.id);
+    } else {
+      setBranchForRole(firstRole?.branch_id || '');
+    }
+    
     setShowAssignRoleDialog(true);
   };
 
@@ -331,6 +404,78 @@ const UserManagement = () => {
     return role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   }
 
+  // ✅ Group users by branch for system admin, filter for others
+  const groupedUsersByBranch = useMemo(() => {
+    if (!canSeeAllUsers) {
+      // Non-system admins: Already filtered by selected branch in loadUsers
+      return { [selectedBranch?.id || 'current']: users };
+    }
+
+    // System admin: Group by branch
+    const grouped: Record<string, UserWithRole[]> = {
+      'no-branch': [],
+    };
+
+    users.forEach(user => {
+      if (user.roles.length === 0 || user.roles.every(r => !r.branch_id)) {
+        grouped['no-branch'].push(user);
+      } else {
+        user.roles.forEach(roleBranch => {
+          if (roleBranch.branch_id) {
+            const branchId = roleBranch.branch_id;
+            if (!grouped[branchId]) {
+              grouped[branchId] = [];
+            }
+            // Only add user once per branch (avoid duplicates if user has multiple roles in same branch)
+            if (!grouped[branchId].find(u => u.id === user.id)) {
+              grouped[branchId].push(user);
+            }
+          }
+        });
+      }
+    });
+
+    return grouped;
+  }, [users, canSeeAllUsers, selectedBranch]);
+
+  // ✅ Get filtered users based on branch filter (for system admin) or all users (for branch admin)
+  const filteredUsers = useMemo(() => {
+    if (!canSeeAllUsers) {
+      // Branch admins: Show all users in their branch (already filtered)
+      return users;
+    }
+
+    // System admin: Apply branch filter
+    if (branchFilter === 'all') {
+      return users;
+    }
+    if (branchFilter === 'no-branch') {
+      return groupedUsersByBranch['no-branch'] || [];
+    }
+    return groupedUsersByBranch[branchFilter] || [];
+  }, [users, branchFilter, groupedUsersByBranch, canSeeAllUsers]);
+
+  // ✅ Initialize expanded branches when grouped view loads (collapsed by default)
+  useEffect(() => {
+    if (canSeeAllUsers && branchFilter === 'all') {
+      // Start with all branches collapsed (empty set)
+      setExpandedBranches(new Set());
+    }
+  }, [canSeeAllUsers, branchFilter, groupedUsersByBranch]);
+
+  // ✅ Toggle branch expansion
+  const toggleBranch = (branchId: string) => {
+    setExpandedBranches(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(branchId)) {
+        newSet.delete(branchId);
+      } else {
+        newSet.add(branchId);
+      }
+      return newSet;
+    });
+  };
+
   if (loading) {
     return (
         <div className="flex items-center justify-center h-64">
@@ -339,13 +484,27 @@ const UserManagement = () => {
     )
   }
 
-  if (!hasAdminAccess) {
+  if (!hasAdminAccess && !canManageRoles) {
     return (
       <div className="p-6">
           <Alert>
               <Shield className="h-4 w-4" />
               <AlertDescription>
                   Access denied. You do not have permission to manage users.
+              </AlertDescription>
+          </Alert>
+      </div>
+    )
+  }
+
+  // ✅ Branch admins must have a selected branch
+  if (!canSeeAllUsers && !selectedBranch) {
+    return (
+      <div className="p-6">
+          <Alert>
+              <Shield className="h-4 w-4" />
+              <AlertDescription>
+                  Please select a branch to manage users.
               </AlertDescription>
           </Alert>
       </div>
@@ -370,64 +529,266 @@ const UserManagement = () => {
             </div>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Branch</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {users.map((u) => (
-                  <TableRow key={u.id}>
-                    <TableCell>
-                      <div className="font-medium">{u.name}</div>
-                      <div className="text-sm text-muted-foreground">{u.email}</div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={getRoleVariant(u.role)}>
-                        <div className="flex items-center gap-2">
-                          {getRoleIcon(u.role)}
-                          {getRoleDisplayName(u.role)}
+            {/* ✅ Branch Filter - Only show for system admin */}
+            {canSeeAllUsers && (
+              <div className="mb-4 flex items-center gap-4">
+                <Label htmlFor="branch-filter" className="text-sm font-medium">Filter by Branch:</Label>
+                <Select value={branchFilter} onValueChange={setBranchFilter}>
+                  <SelectTrigger id="branch-filter" className="w-[250px]">
+                    <SelectValue placeholder="All Branches" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Branches (Grouped View)</SelectItem>
+                    <SelectItem value="no-branch">No Branch (System/Regional Admins)</SelectItem>
+                    {branches.map(branch => (
+                      <SelectItem key={branch.id} value={branch.id}>
+                        {branch.name} ({branch.code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="text-sm text-muted-foreground">
+                  Showing {filteredUsers.length} of {users.length} users
+                </div>
+              </div>
+            )}
+
+            {/* ✅ Branch context for branch admins */}
+            {!canSeeAllUsers && selectedBranch && (
+              <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-950 rounded-md border border-blue-200 dark:border-blue-800">
+                <div className="flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-blue-600" />
+                  <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                    Managing users for: <strong>{selectedBranch.name}</strong> ({selectedBranch.code})
+                  </span>
+                </div>
+                <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                  You can only view and manage users assigned to this branch.
+                </p>
+              </div>
+            )}
+
+            {/* ✅ Grouped view for system admin, simple list for branch admin */}
+            {canSeeAllUsers && branchFilter === 'all' ? (
+              // System admin: Show grouped by branch (collapsible)
+              <div className="space-y-4">
+                {Object.entries(groupedUsersByBranch).map(([branchId, branchUsers]) => {
+                  const branch = branchId === 'no-branch' 
+                    ? { name: 'System/Regional Admins', code: 'N/A', id: 'no-branch' }
+                    : branches.find(b => b.id === branchId);
+                  
+                  if (!branch || branchUsers.length === 0) return null;
+
+                  const isExpanded = expandedBranches.has(branchId);
+
+                  return (
+                    <Collapsible
+                      key={branchId}
+                      open={isExpanded}
+                      onOpenChange={() => toggleBranch(branchId)}
+                      className="border rounded-lg"
+                    >
+                      <CollapsibleTrigger asChild>
+                        <div className="flex items-center justify-between w-full p-4 hover:bg-muted/50 cursor-pointer transition-colors">
+                          <div className="flex items-center gap-3">
+                            {isExpanded ? (
+                              <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                            )}
+                            <Building2 className="h-5 w-5 text-blue-600" />
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-lg font-semibold">{branch.name}</h3>
+                              {branch.code !== 'N/A' && (
+                                <Badge variant="outline" className="text-xs">{branch.code}</Badge>
+                              )}
+                              <Badge variant="secondary" className="text-xs">
+                                {branchUsers.length} user{branchUsers.length !== 1 ? 's' : ''}
+                              </Badge>
+                            </div>
+                          </div>
                         </div>
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{u.branch_name || 'N/A'}</TableCell>
-                    <TableCell>
-                      <Badge variant={u.status === 'active' ? 'default' : 'secondary'}>
-                        {u.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <span className="sr-only">Open menu</span>
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => openEditDialog(u)}>
-                            Edit User
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => openAssignRoleDialog(u)}>
-                            <Crown className="mr-2 h-4 w-4" />
-                            Assign/Change Role
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleDeleteUser(u.id)} className="text-red-500">
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete User
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="px-4 pb-4">
+                          <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>User</TableHead>
+                            <TableHead>Roles</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {branchUsers.map((u) => {
+                            // Filter roles to show only roles for this branch
+                            const branchRoles = branchId === 'no-branch' 
+                              ? u.roles.filter(r => !r.branch_id)
+                              : u.roles.filter(r => r.branch_id === branchId);
+                            
+                            return (
+                              <TableRow key={u.id}>
+                                <TableCell>
+                                  <div className="font-medium">{u.name}</div>
+                                  <div className="text-sm text-muted-foreground">{u.email}</div>
+                                  {u.phone && (
+                                    <div className="text-xs text-muted-foreground">{u.phone}</div>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="space-y-2">
+                                    {branchRoles.length === 0 ? (
+                                      <Badge variant="outline" className="text-xs">
+                                        No Role in This Branch
+                                      </Badge>
+                                    ) : (
+                                      branchRoles.map((roleBranch, index) => (
+                                        <Badge key={index} variant={getRoleVariant(roleBranch.role)} className="text-xs">
+                                          <div className="flex items-center gap-1">
+                                            {getRoleIcon(roleBranch.role)}
+                                            {getRoleDisplayName(roleBranch.role)}
+                                          </div>
+                                        </Badge>
+                                      ))
+                                    )}
+                                  </div>
+                                </TableCell>
+                                <TableCell>
+                                  <Badge variant={u.status === 'active' ? 'default' : 'secondary'}>
+                                    {u.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" className="h-8 w-8 p-0">
+                                        <span className="sr-only">Open menu</span>
+                                        <MoreHorizontal className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem onClick={() => openEditDialog(u)}>
+                                        Edit User
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => openAssignRoleDialog(u)}>
+                                        <Crown className="mr-2 h-4 w-4" />
+                                        Assign/Change Role
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleDeleteUser(u.id)} className="text-red-500">
+                                        <Trash2 className="mr-2 h-4 w-4" />
+                                        Delete User
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  );
+                })}
+              </div>
+            ) : (
+              // Simple list view (for branch filter or branch admin)
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>User</TableHead>
+                    <TableHead>Roles & Branches</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filteredUsers.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+                        No users found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredUsers.map((u) => (
+                      <TableRow key={u.id}>
+                        <TableCell>
+                          <div className="font-medium">{u.name}</div>
+                          <div className="text-sm text-muted-foreground">{u.email}</div>
+                          {u.phone && (
+                            <div className="text-xs text-muted-foreground">{u.phone}</div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-2">
+                            {u.roles.length === 0 ? (
+                              <Badge variant="outline" className="text-xs">
+                                No Role Assigned
+                              </Badge>
+                            ) : (
+                              u.roles.map((roleBranch, index) => (
+                                <div key={index} className="flex items-center gap-2">
+                                  <Badge variant={getRoleVariant(roleBranch.role)} className="text-xs">
+                                    <div className="flex items-center gap-1">
+                                      {getRoleIcon(roleBranch.role)}
+                                      {getRoleDisplayName(roleBranch.role)}
+                                    </div>
+                                  </Badge>
+                                  {roleBranch.branch_name ? (
+                                    <Badge variant="secondary" className="text-xs">
+                                      {roleBranch.branch_name}
+                                      {roleBranch.branch_code && ` (${roleBranch.branch_code})`}
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-xs">
+                                      All Branches
+                                    </Badge>
+                                  )}
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={u.status === 'active' ? 'default' : 'secondary'}>
+                            {u.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0">
+                                <span className="sr-only">Open menu</span>
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => openEditDialog(u)}>
+                                Edit User
+                              </DropdownMenuItem>
+                              {canManageRoles && (
+                                <DropdownMenuItem onClick={() => openAssignRoleDialog(u)}>
+                                  <Crown className="mr-2 h-4 w-4" />
+                                  Assign/Change Role
+                                </DropdownMenuItem>
+                              )}
+                              {canSeeAllUsers && (
+                                <DropdownMenuItem onClick={() => handleDeleteUser(u.id)} className="text-red-500">
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete User
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -455,12 +816,35 @@ const UserManagement = () => {
             {!['system_admin', 'regional_manager'].includes(roleToAssign) && (
               <div className="space-y-2">
                 <Label htmlFor="branch-assign">Branch</Label>
-                <Select value={branchForRole} onValueChange={setBranchForRole}>
-                  <SelectTrigger id="branch-assign"><SelectValue placeholder="Select a branch" /></SelectTrigger>
+                <Select 
+                  value={branchForRole} 
+                  onValueChange={setBranchForRole}
+                  disabled={!canSeeAllUsers && isBranchSystemAdmin && !!selectedBranch}
+                >
+                  <SelectTrigger id="branch-assign">
+                    <SelectValue placeholder="Select a branch" />
+                  </SelectTrigger>
                   <SelectContent>
-                    {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    {!canSeeAllUsers && isBranchSystemAdmin && selectedBranch ? (
+                      // Branch admin: Only show their branch
+                      <SelectItem value={selectedBranch.id}>
+                        {selectedBranch.name} ({selectedBranch.code})
+                      </SelectItem>
+                    ) : (
+                      // System admin: Show all branches
+                      branches.map(b => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name} ({b.code})
+                        </SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
+                {!canSeeAllUsers && isBranchSystemAdmin && selectedBranch && (
+                  <p className="text-xs text-muted-foreground">
+                    You can only assign roles within your branch ({selectedBranch.name}).
+                  </p>
+                )}
               </div>
             )}
           </div>

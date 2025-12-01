@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUserRole } from '@/hooks/useUserRole'
+import { useBranch } from '@/contexts/BranchContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,7 +16,8 @@ import {
   Users,
   Shuffle,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Building2
 } from 'lucide-react'
 import { supabase } from '@/integrations/supabase/client'
 import { useToast } from '@/hooks/use-toast'
@@ -51,6 +53,7 @@ interface Assignment {
 }
 
 const Assignments = () => {
+  const { selectedBranch, isSystemAdmin, isRegionalManager } = useBranch()
   const { user, signOut } = useAuth()
   const { hasAdminAccess, loading: roleLoading } = useUserRole()
   const { toast } = useToast()
@@ -67,15 +70,28 @@ const Assignments = () => {
 
   useEffect(() => {
     fetchData()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedBranch, isSystemAdmin, isRegionalManager]) // Re-fetch when branch changes
 
   const fetchData = async () => {
+    // Don't fetch if no branch selected - ALL users need a selected branch
+    if (!selectedBranch) {
+      setStockItems([])
+      setAssignments([])
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     try {
       // Fetch stock items
-      const { data: items, error: itemsError } = await supabase
+      let query = supabase
         .from('stock_items')
         .select('*')
+      
+      // ✅ ALWAYS filter by selected branch
+      query = query.eq('branch_id', selectedBranch.id)
+      
+      const { data: items, error: itemsError } = await query
       if (itemsError) throw itemsError
       
       // IMMUTABLE LAW: Exclude expired items from assignments
@@ -104,11 +120,18 @@ const Assignments = () => {
       
       setStockItems(itemsWithRiskLevels)
       
-      // Fetch dispensers
-      const { data: disp, error: dispError } = await supabase
+      // Fetch dispensers - filter by branch
+      let dispensersQuery = supabase
         .from('users_with_roles')
-        .select('user_id, name')
+        .select('user_id, name, branch_id')
         .eq('role', 'dispenser')
+      
+      // Filter by branch unless system admin or regional manager
+      if (!isSystemAdmin && !isRegionalManager && selectedBranch) {
+        dispensersQuery = dispensersQuery.eq('branch_id', selectedBranch.id)
+      }
+      
+      const { data: disp, error: dispError } = await dispensersQuery
       if (dispError) throw dispError
       setDispensers((disp || []).map(d => ({ id: d.user_id, dispenser: d.name, role: 'dispenser' })))
     } catch (error: unknown) {
@@ -294,6 +317,16 @@ const Assignments = () => {
           <div>
             <h1 className="text-3xl font-bold text-white mb-2">Task Assignment</h1>
             <p className="text-slate-400">Assign stock items equally among all dispensers</p>
+            {/* ✅ Branch Context Display */}
+            {selectedBranch && (
+              <div className="flex items-center gap-2 mt-2">
+                <Building2 className="h-4 w-4 text-blue-400" />
+                <Badge variant="outline" className="text-xs">
+                  {selectedBranch.name} ({selectedBranch.code})
+                  {selectedBranch.region && ` - ${selectedBranch.region}`}
+                </Badge>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-4">
             <Button 

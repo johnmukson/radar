@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/integrations/supabase/client'
+import { useBranch } from '@/contexts/BranchContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -64,6 +65,7 @@ const calculateRiskLevel = (dueDate: string): string => {
 }
 
 const WeeklyTasksTable = () => {
+  const { selectedBranch, isSystemAdmin, isRegionalManager } = useBranch()
   const [allTasks, setAllTasks] = useState<WeeklyTask[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -82,25 +84,43 @@ const WeeklyTasksTable = () => {
   const { toast } = useToast()
 
   const fetchTasks = async () => {
+    // Don't fetch if no branch selected - ALL users need a selected branch
+    if (!selectedBranch) {
+      setTasks([])
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     setError(null)
     
     try {
-      const { data, error } = await supabase
+      // Build weekly_tasks query - filter by branch_id
+      let tasksQuery = supabase
         .from('weekly_tasks')
         .select(`
           *,
           assignee:assigned_to(name),
           assigner:assigned_by(name)
         `)
+      
+      // ✅ ALWAYS filter weekly_tasks by selected branch
+      tasksQuery = tasksQuery.eq('branch_id', selectedBranch.id)
+      
+      const { data, error } = await tasksQuery
         .order('due_date', { ascending: true })
       
       if (error) throw error
       
-      // Fetch stock items to get quantities
-      const { data: stockItems, error: stockError } = await supabase
+      // Fetch stock items to get quantities - filter by branch
+      let stockQuery = supabase
         .from('stock_items')
-        .select('id, product_name, quantity')
+        .select('id, product_name, quantity, branch_id')
+      
+      // ✅ ALWAYS filter by selected branch
+      stockQuery = stockQuery.eq('branch_id', selectedBranch.id)
+      
+      const { data: stockItems, error: stockError } = await stockQuery
       
       if (stockError) {
         console.warn('Could not fetch stock items:', stockError)
@@ -221,13 +241,25 @@ const WeeklyTasksTable = () => {
 
   // Fetch stock items for search
   const fetchStockItems = async () => {
+    // Don't fetch if no branch selected (unless system admin/regional manager)
+    if (!selectedBranch && !isSystemAdmin && !isRegionalManager) {
+      return
+    }
+
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('stock_items')
         .select(`
           *,
           branches(name)
         `)
+      
+      // Filter by branch unless system admin or regional manager
+      if (!isSystemAdmin && !isRegionalManager && selectedBranch) {
+        query = query.eq('branch_id', selectedBranch.id)
+      }
+      
+      const { data, error } = await query
         .order('product_name', { ascending: true })
       
       if (error) throw error
@@ -367,7 +399,7 @@ const WeeklyTasksTable = () => {
     fetchTasks()
     fetchDispensers()
     fetchStockItems() // Load stock items initially for adjust buttons
-  }, [])
+  }, [selectedBranch]) // ✅ Re-fetch when branch changes
 
   // Debounced search effect
   useEffect(() => {

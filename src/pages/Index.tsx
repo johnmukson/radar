@@ -1,20 +1,27 @@
 import React, { useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useBranch } from '@/contexts/BranchContext'
 import { useNavigate } from 'react-router-dom'
 
 const Index = () => {
-  const { user, loading } = useAuth()
+  const { user, loading: authLoading } = useAuth()
+  const { selectedBranch, loading: branchLoading } = useBranch()
   const navigate = useNavigate()
 
   useEffect(() => {
-    if (!loading) {
+    if (!authLoading && !branchLoading) {
       if (user) {
-        navigate('/dashboard')
+        // If user is authenticated but no branch selected, redirect to branch selection
+        if (!selectedBranch) {
+          navigate('/branch-selection')
+        } else {
+          navigate('/dashboard')
+        }
       } else {
         navigate('/auth')
       }
     }
-  }, [user, loading, navigate])
+  }, [user, selectedBranch, authLoading, branchLoading, navigate])
 
   // Optionally, show a loading spinner while redirecting
   return (
