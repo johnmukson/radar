@@ -1,0 +1,52 @@
+warning: in the working copy of 'src/App.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/integrations/supabase/client.ts', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/src/App.tsx b/src/App.tsx[m
+[1mindex 7d34237..3099697 100644[m
+[1m--- a/src/App.tsx[m
+[1m+++ b/src/App.tsx[m
+[36m@@ -28,11 +28,13 @@[m [mimport DormantStock from '@/pages/DormantStock'[m
+ import { StockAdjusterProvider } from '@/contexts/StockAdjusterContext'[m
+ import UpdatePassword from "./pages/UpdatePassword";[m
+ import FloatingNotesButton from '@/components/FloatingNotesButtonHybrid';[m
+[32m+[m[32mimport ErrorBoundary from '@/components/ErrorBoundary';[m
+ [m
+ const queryClient = new QueryClient();[m
+ [m
+ const App = () => ([m
+[31m-  <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>[m
+[32m+[m[32m  <ErrorBoundary>[m
+[32m+[m[32m    <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>[m
+     <QueryClientProvider client={queryClient}>[m
+       <TooltipProvider>[m
+         <AuthProvider>[m
+[36m@@ -152,6 +154,7 @@[m [mconst App = () => ([m
+       </TooltipProvider>[m
+     </QueryClientProvider>[m
+   </ThemeProvider>[m
+[32m+[m[32m  </ErrorBoundary>[m
+ );[m
+ [m
+ export default App;[m
+[1mdiff --git a/src/integrations/supabase/client.ts b/src/integrations/supabase/client.ts[m
+[1mindex 8ec521a..2336f68 100644[m
+[1m--- a/src/integrations/supabase/client.ts[m
+[1m+++ b/src/integrations/supabase/client.ts[m
+[36m@@ -1,9 +1,18 @@[m
+ import { createClient } from '@supabase/supabase-js'[m
+ import type { Database } from './types'[m
+ [m
+[32m+[m[32m// Get environment variables with fallbacks[m
+ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://pvtrcbemeesaebrwhenw.supabase.co'[m
+ const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB2dHJjYmVtZWVzYWVicndoZW53Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk0MjQyNzEsImV4cCI6MjA2NTAwMDI3MX0.sHDfLt6rX6-fJjHVRMhZGAvXg-W42TORjb_Plv1WtTs'[m
+ [m
+[32m+[m[32m// Validate environment variables in production[m
+[32m+[m[32mif (import.meta.env.PROD) {[m
+[32m+[m[32m  if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {[m
+[32m+[m[32m    console.error('⚠️ Missing Supabase environment variables in production!')[m
+[32m+[m[32m    console.error('Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel environment variables.')[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+ // Get the current domain - handle both development and production[m
+ const getCurrentDomain = () => {[m
+   // Check if we're in production (Vercel)[m
