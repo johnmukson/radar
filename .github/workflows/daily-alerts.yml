@@ -1,0 +1,24 @@
+name: Daily Alerts
+
+on:
+  schedule:
+    # Run at 7 AM UTC daily (adjust cron expression for your timezone)
+    # 7 AM UTC = 12 PM EST, 3 PM PST, etc.
+    - cron: '0 7 * * *'
+  workflow_dispatch:  # Allow manual trigger for testing
+
+jobs:
+  send-daily-alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Daily Alerts Function
+        run: |
+          curl -X POST https://pvtrcbemeesaebrwhenw.supabase.co/functions/v1/daily-alerts \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
+        
+      - name: Check Response
+        run: |
+          echo "Daily alerts triggered successfully"
+

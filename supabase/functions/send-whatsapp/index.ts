@@ -39,10 +39,27 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders })
   }
 
+  console.log('Send WhatsApp function called:', {
+    method: req.method,
+    url: req.url
+  })
+
   try {
-    // Initialize Supabase client with service role
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    // Validate required environment variables
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    
+    if (!supabaseUrl || !supabaseServiceKey) {
+      console.error('Missing Supabase environment variables')
+      return new Response(
+        JSON.stringify({ 
+          error: 'Server configuration error',
+          details: 'Missing required environment variables (SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY)'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     const supabase = createClient(supabaseUrl, supabaseServiceKey)
 
     // Get Twilio credentials
@@ -51,7 +68,14 @@ serve(async (req) => {
     const fromNumber = Deno.env.get('TWILIO_WHATSAPP_NUMBER') // Format: +14155552671 (no whatsapp: prefix)
 
     if (!accountSid || !authToken || !fromNumber) {
-      throw new Error('Missing Twilio credentials. Please set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_WHATSAPP_NUMBER environment variables.')
+      console.error('Missing Twilio credentials')
+      return new Response(
+        JSON.stringify({ 
+          error: 'Missing Twilio credentials',
+          details: 'Please set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_WHATSAPP_NUMBER environment variables.'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
     const requestBody: WhatsAppRequest = await req.json()
@@ -194,18 +218,29 @@ serve(async (req) => {
     )
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error)
-    console.error('Error in send-whatsapp function:', errorMessage)
+    const errorStack = error instanceof Error ? error.stack : undefined
     
-    return new Response(
+    console.error('Error in send-whatsapp function:', errorMessage)
+    console.error('Error details:', {
+      message: errorMessage,
+      stack: errorStack,
+      name: error instanceof Error ? error.name : 'Unknown'
+    })
+    
+    const errorResponse = new Response(
       JSON.stringify({
         success: false,
-        error: errorMessage
+        error: errorMessage,
+        details: errorMessage
       }),
       {
         headers: { 'Content-Type': 'application/json', ...corsHeaders },
         status: 500,
       }
     )
+    
+    console.log('Returning error response to client')
+    return errorResponse
   }
 })
 
@@ -247,15 +282,36 @@ async function sendWhatsAppMessage(
 
   console.log(`Sending WhatsApp message to ${toNumber} from ${fromWhatsApp}`)
 
-  // Send request to Twilio
-  const twilioResponse = await fetch(twilioUrl, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${btoa(`${accountSid}:${authToken}`)}`,
-      'Content-Type': 'application/x-www-form-urlencoded'
-    },
-    body: formData.toString()
-  })
+  // Send request to Twilio with timeout (20 seconds)
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 20000)
+
+  let twilioResponse: Response
+  try {
+    twilioResponse = await fetch(twilioUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${btoa(`${accountSid}:${authToken}`)}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: formData.toString(),
+      signal: controller.signal
+    })
+    clearTimeout(timeoutId)
+  } catch (fetchError: any) {
+    clearTimeout(timeoutId)
+    if (fetchError.name === 'AbortError') {
+      const errorMsg = 'Twilio API request timed out after 20 seconds'
+      console.error(errorMsg)
+      await supabase.rpc('update_whatsapp_notification_status', {
+        p_notification_id: notification.id,
+        p_status: 'failed',
+        p_error_message: errorMsg
+      })
+      throw new Error(errorMsg)
+    }
+    throw fetchError
+  }
 
   const twilioResult = await twilioResponse.json()
 

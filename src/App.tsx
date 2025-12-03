@@ -25,6 +25,7 @@ import StockUpload from "./components/StockUpload";
 import { ThemeProvider } from "next-themes";
 import Analysis from '@/pages/Analysis'
 import DormantStock from '@/pages/DormantStock'
+import AiInsights from '@/pages/AiInsights'
 import { StockAdjusterProvider } from '@/contexts/StockAdjusterContext'
 import UpdatePassword from "./pages/UpdatePassword";
 import FloatingNotesButton from '@/components/FloatingNotesButtonHybrid';
@@ -136,6 +137,14 @@ const App = () => (
                       <AppSidebar />
                       <SidebarInset className="flex-1">
                         <DormantStock />
+                      </SidebarInset>
+                    </SidebarProvider>
+                  } />
+                  <Route path="/ai-insights" element={
+                    <SidebarProvider>
+                      <AppSidebar />
+                      <SidebarInset className="flex-1">
+                        <AiInsights />
                       </SidebarInset>
                     </SidebarProvider>
                   } />

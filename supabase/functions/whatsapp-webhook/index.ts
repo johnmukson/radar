@@ -17,20 +17,34 @@ async function upsert(payload: Record<string, unknown>) {
     throw new Error('Supabase environment variables are not configured')
   }
 
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_notifications`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: SERVICE_ROLE,
-      Authorization: `Bearer ${SERVICE_ROLE}`,
-      Prefer: 'resolution=merge-duplicates',
-    },
-    body: JSON.stringify(payload),
-  })
+  // Add timeout for database operations (10 seconds)
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 10000)
 
-  if (!response.ok) {
-    const text = await response.text()
-    throw new Error(`DB upsert error: ${response.status} ${text}`)
+  try {
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_notifications`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SERVICE_ROLE,
+        Authorization: `Bearer ${SERVICE_ROLE}`,
+        Prefer: 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    })
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      const text = await response.text()
+      throw new Error(`DB upsert error: ${response.status} ${text}`)
+    }
+  } catch (fetchError: any) {
+    clearTimeout(timeoutId)
+    if (fetchError.name === 'AbortError') {
+      throw new Error('Database operation timed out after 10 seconds')
+    }
+    throw fetchError
   }
 }
 
@@ -82,9 +96,17 @@ serve(async (req) => {
     })
   } catch (error) {
     console.error('whatsapp-webhook error:', error)
-    return new Response('Webhook error', {
-      status: 500,
-      headers: corsHeaders,
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    console.error('Error details:', {
+      message: errorMessage,
+      name: error instanceof Error ? error.name : 'Unknown'
     })
+    return new Response(
+      JSON.stringify({ error: 'Webhook error', details: errorMessage }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    )
   }
 })

@@ -99,9 +99,14 @@ const UserManagement = () => {
 
   const loadInitialData = useCallback(async () => {
     setLoading(true);
-    await Promise.all([loadUsers(), loadBranches()]);
-    setLoading(false);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    try {
+      await Promise.all([loadUsers(), loadBranches()]);
+    } catch (error) {
+      console.error('Error loading initial data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedBranch]); // ✅ Re-load when branch changes
 
   useEffect(() => {
     if (hasAdminAccess || canManageRoles) {
@@ -109,10 +114,12 @@ const UserManagement = () => {
     } else {
       setLoading(false)
     }
-  }, [hasAdminAccess, canManageRoles, loadInitialData, selectedBranch]) // ✅ Re-load when branch changes
+  }, [hasAdminAccess, canManageRoles, loadInitialData]) // ✅ Re-load when access changes
 
   const loadUsers = async () => {
     try {
+      console.log('Loading users...', { canSeeAllUsers, selectedBranch: selectedBranch?.id });
+      
       let query = supabase
         .from('users')
         .select(`
@@ -136,9 +143,31 @@ const UserManagement = () => {
       }
       
       const { data, error } = await query;
-      if (error) throw error
+      
+      if (error) {
+        console.error('Error loading users:', error);
+        console.error('Error details:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        });
+        throw error;
+      }
       
       console.log('Loaded users with roles:', data);
+      console.log('Number of users loaded:', data?.length || 0);
+      
+      if (!data || data.length === 0) {
+        console.warn('No users returned from query. Possible reasons:');
+        console.warn('1. No users exist in the database');
+        console.warn('2. RLS policies are blocking access');
+        console.warn('3. User role does not have permission');
+        console.warn('Current user:', user?.id);
+        console.warn('Is system admin:', userIsSystemAdmin);
+        console.warn('Is branch system admin:', isBranchSystemAdmin);
+        console.warn('Selected branch:', selectedBranch?.id);
+      }
       
       // ✅ Transform to show ALL roles/branches per user
       let transformedUsers: UserWithRole[] = (data || []).map((user: any) => {
@@ -169,11 +198,23 @@ const UserManagement = () => {
       }
       
       console.log('Transformed users with all roles:', transformedUsers);
+      console.log('Final user count:', transformedUsers.length);
+      
+      if (transformedUsers.length === 0) {
+        console.warn('No users found. This could be due to:');
+        console.warn('1. No users in the database');
+        console.warn('2. RLS policies blocking access');
+        console.warn('3. User role not allowing access');
+        console.warn('Current user role:', userIsSystemAdmin, isBranchSystemAdmin);
+        console.warn('Selected branch:', selectedBranch?.id);
+      }
       
       setUsers(transformedUsers)
     } catch (error: unknown) {
+      console.error('Error in loadUsers:', error);
       const errorMessage = extractErrorMessage(error, "Failed to load users")
       toast({ title: "Error", description: errorMessage, variant: "destructive" })
+      setUsers([]) // Set empty array on error
     }
   }
 
@@ -572,12 +613,29 @@ const UserManagement = () => {
             {canSeeAllUsers && branchFilter === 'all' ? (
               // System admin: Show grouped by branch (collapsible)
               <div className="space-y-4">
-                {Object.entries(groupedUsersByBranch).map(([branchId, branchUsers]) => {
-                  const branch = branchId === 'no-branch' 
-                    ? { name: 'System/Regional Admins', code: 'N/A', id: 'no-branch' }
-                    : branches.find(b => b.id === branchId);
-                  
-                  if (!branch || branchUsers.length === 0) return null;
+                {Object.keys(groupedUsersByBranch).length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p className="font-medium mb-2">No users found</p>
+                    <p className="text-sm mb-4">
+                      No users in database or access denied. Check console for details.
+                    </p>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => loadUsers()}
+                    >
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Refresh
+                    </Button>
+                  </div>
+                ) : (
+                  Object.entries(groupedUsersByBranch).map(([branchId, branchUsers]) => {
+                    const branch = branchId === 'no-branch' 
+                      ? { name: 'System/Regional Admins', code: 'N/A', id: 'no-branch' }
+                      : branches.find(b => b.id === branchId);
+                    
+                    if (!branch || branchUsers.length === 0) return null;
 
                   const isExpanded = expandedBranches.has(branchId);
 
@@ -691,7 +749,8 @@ const UserManagement = () => {
                       </CollapsibleContent>
                     </Collapsible>
                   );
-                })}
+                  })
+                )}
               </div>
             ) : (
               // Simple list view (for branch filter or branch admin)
@@ -708,7 +767,33 @@ const UserManagement = () => {
                   {filteredUsers.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                        No users found
+                        <div className="space-y-2">
+                          <p className="font-medium">No users found</p>
+                          <p className="text-sm">
+                            {users.length === 0 ? (
+                              <span>
+                                No users in database or access denied. 
+                                {!canSeeAllUsers && !selectedBranch && ' Please select a branch.'}
+                                {!userIsSystemAdmin && !isBranchSystemAdmin && ' You may not have permission to view users.'}
+                              </span>
+                            ) : (
+                              <span>No users match the current filter.</span>
+                            )}
+                          </p>
+                          {hasAdminAccess && (
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => {
+                                console.log('Manual refresh triggered');
+                                loadUsers();
+                              }}
+                            >
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                              Refresh
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   ) : (

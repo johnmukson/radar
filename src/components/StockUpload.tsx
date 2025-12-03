@@ -153,11 +153,11 @@ const StockUpload = () => {
     }
   }
 
-  // ✅ Branch-scoped: Only count items for selected branch (except system admin)
+  // ✅ Branch-scoped: Always filter by selected branch when available
   const fetchTotalStockItems = async () => {
     try {
-      // If no branch selected and not system admin, don't fetch
-      if (!selectedBranch && !isSystemAdmin) {
+      // If no branch selected, don't fetch
+      if (!selectedBranch) {
         setTotalStockItems(0)
         return
       }
@@ -166,10 +166,8 @@ const StockUpload = () => {
         .from('stock_items')
         .select('*', { count: 'exact', head: true })
 
-      // ✅ Filter by branch if not system admin
-      if (!isSystemAdmin && selectedBranch) {
-        query = query.eq('branch_id', selectedBranch.id)
-      }
+      // ✅ Always filter by selected branch (compartmentalized)
+      query = query.eq('branch_id', selectedBranch.id)
 
       const { count, error } = await query
       
@@ -1030,19 +1028,17 @@ const StockUpload = () => {
         throw new Error('You do not have permission to delete stock items. Only admins and managers can perform this action.')
       }
 
-      // ✅ Branch-scoped deletion: System admin can delete all, others only their branch
-      let query = supabase
-        .from('stock_items')
-        .select('*')
-
-      // If not system admin, filter by selected branch
-      if (!isSystemAdmin && selectedBranch) {
-        query = query.eq('branch_id', selectedBranch.id)
-      } else if (!isSystemAdmin && !selectedBranch) {
+      // ✅ Branch-scoped deletion: Always filter by selected branch (compartmentalized)
+      if (!selectedBranch) {
         throw new Error('Please select a branch to delete stock items.')
       }
 
-      console.log('Fetching stock items...', isSystemAdmin ? '(all branches)' : `(branch: ${selectedBranch?.name})`)
+      let query = supabase
+        .from('stock_items')
+        .select('*')
+        .eq('branch_id', selectedBranch.id) // ✅ Always filter by selected branch
+
+      console.log('Fetching stock items...', `(branch: ${selectedBranch.name})`)
       const { data: allItems, error: fetchError } = await query
       
       console.log('Fetch result:', { allItems: allItems?.length || 0, fetchError })
@@ -1102,17 +1098,17 @@ const StockUpload = () => {
         console.log('📊 Movement history recorded:', { movementSuccessCount, movementErrorCount })
       }
 
-      // ✅ Delete movement history records first (branch-scoped for non-system admins)
+      // ✅ Delete movement history records first (branch-scoped)
       console.log('🗑️ Deleting movement history records first...')
+      if (!selectedBranch) {
+        throw new Error('Please select a branch to delete movement history.')
+      }
+      
       let movementDeleteQuery = supabase
         .from('stock_movement_history')
         .delete()
         .neq('id', '00000000-0000-0000-0000-000000000000')
-
-      // If not system admin, filter by selected branch
-      if (!isSystemAdmin && selectedBranch) {
-        movementDeleteQuery = movementDeleteQuery.eq('from_branch_id', selectedBranch.id)
-      }
+        .eq('from_branch_id', selectedBranch.id) // ✅ Always filter by selected branch
 
       const { error: movementDeleteError } = await movementDeleteQuery
 
@@ -1123,17 +1119,17 @@ const StockUpload = () => {
         console.log('✅ Movement history records deleted successfully')
       }
 
-      // ✅ Delete stock items (branch-scoped for non-system admins)
-      console.log('🗑️ Attempting to delete stock items...', isSystemAdmin ? '(all branches)' : `(branch: ${selectedBranch?.name})`)
+      // ✅ Delete stock items (branch-scoped)
+      console.log('🗑️ Attempting to delete stock items...', `(branch: ${selectedBranch.name})`)
+      if (!selectedBranch) {
+        throw new Error('Please select a branch to delete stock items.')
+      }
+      
       let deleteQuery = supabase
         .from('stock_items')
         .delete()
         .neq('id', '00000000-0000-0000-0000-000000000000')
-
-      // If not system admin, filter by selected branch
-      if (!isSystemAdmin && selectedBranch) {
-        deleteQuery = deleteQuery.eq('branch_id', selectedBranch.id)
-      }
+        .eq('branch_id', selectedBranch.id) // ✅ Always filter by selected branch
 
       const { error: deleteError } = await deleteQuery
 
@@ -1147,16 +1143,16 @@ const StockUpload = () => {
         deletedCount = allItems?.length || 0
       }
 
-      // ✅ Delete weekly tasks (branch-scoped for non-system admins)
-      console.log('🗑️ Attempting to delete weekly tasks...', isSystemAdmin ? '(all branches)' : `(branch: ${selectedBranch?.name})`)
+      // ✅ Delete weekly tasks (branch-scoped)
+      console.log('🗑️ Attempting to delete weekly tasks...', `(branch: ${selectedBranch.name})`)
+      if (!selectedBranch) {
+        throw new Error('Please select a branch to delete weekly tasks.')
+      }
+      
       let weeklyTasksQuery = supabase
         .from('weekly_tasks')
         .select('*')
-
-      // If not system admin, filter by selected branch
-      if (!isSystemAdmin && selectedBranch) {
-        weeklyTasksQuery = weeklyTasksQuery.eq('branch_id', selectedBranch.id)
-      }
+        .eq('branch_id', selectedBranch.id) // ✅ Always filter by selected branch
 
       const { data: weeklyTasks, error: weeklyTasksError } = await weeklyTasksQuery
 
@@ -1271,10 +1267,10 @@ const StockUpload = () => {
                   <AlertDialogTitle className="text-red-600">⚠️ Delete Stock Items & Weekly Tasks</AlertDialogTitle>
                   <AlertDialogDescription>
                     <span className="text-red-600 font-medium">
-                      ⚠️ WARNING: This will permanently delete {isSystemAdmin ? `ALL ${totalStockItems} stock items AND ALL weekly tasks from ALL branches` : `${totalStockItems} stock items AND weekly tasks from ${selectedBranch?.name || 'selected branch'}`}.
+                      ⚠️ WARNING: This will permanently delete {totalStockItems} stock items AND weekly tasks from {selectedBranch?.name || 'selected branch'}.
                     </span>
                     <br /><br />
-                    This action cannot be undone and will permanently remove {isSystemAdmin ? 'ALL' : 'branch'} stock items and weekly tasks from the system.
+                    This action cannot be undone and will permanently remove all stock items and weekly tasks from {selectedBranch?.name || 'the selected branch'}.
                     <br /><br />
                     <strong>Are you absolutely sure you want to continue?</strong>
                   </AlertDialogDescription>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useBranch } from '@/contexts/BranchContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -46,34 +47,93 @@ interface DispenserPerformance {
 
 const LedgerBoard = () => {
   const { user } = useAuth()
+  const { selectedBranch, isSystemAdmin, isRegionalManager, availableBranches } = useBranch()
+  const [userAssignedBranch, setUserAssignedBranch] = useState<{ id: string; name: string } | null>(null)
   const [movements, setMovements] = useState<StockMovement[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterType, setFilterType] = useState<string>('all')
   const [filterBranch, setFilterBranch] = useState<string>('all')
   const { toast } = useToast()
+  
+  // Determine which branch to use: user's assigned branch (for non-admins) or selectedBranch (for admins)
+  const activeBranch = isSystemAdmin || isRegionalManager 
+    ? selectedBranch 
+    : (userAssignedBranch ? { id: userAssignedBranch.id, name: userAssignedBranch.name } : selectedBranch)
 
   // Performance tracking states
   const [dispenserPerformance, setDispenserPerformance] = useState<DispenserPerformance[]>([])
   const [performanceLoading, setPerformanceLoading] = useState(true)
   const [selectedPeriod, setSelectedPeriod] = useState('week') // week, month, quarter
 
+  // Load user's assigned branch from their role
+  useEffect(() => {
+    const loadUserBranch = async () => {
+      if (!user || isSystemAdmin || isRegionalManager) {
+        // System admins and regional managers use selectedBranch
+        setUserAssignedBranch(null)
+        return
+      }
+
+      try {
+        // Get user's assigned branch from user_roles
+        const { data: userRoles, error } = await supabase
+          .from('user_roles')
+          .select(`
+            branch_id,
+            branch:branches!inner(id, name, code, status)
+          `)
+          .eq('user_id', user.id)
+          .not('branch_id', 'is', null)
+          .eq('branch.status', 'active')
+          .limit(1) // Get first assigned branch
+
+        if (error) throw error
+
+        if (userRoles && userRoles.length > 0) {
+          const branch = userRoles[0].branch
+          setUserAssignedBranch({
+            id: branch.id,
+            name: branch.name
+          })
+        } else {
+          // No assigned branch found
+          setUserAssignedBranch(null)
+        }
+      } catch (error) {
+        console.error('Error loading user branch:', error)
+        setUserAssignedBranch(null)
+      }
+    }
+
+    loadUserBranch()
+  }, [user, isSystemAdmin, isRegionalManager])
+
   const loadMovements = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('stock_movement_history')
         .select(`
           *,
-          stock_items!inner(product_name),
+          stock_items!inner(product_name, branch_id),
           from_branch:branches!stock_movement_history_from_branch_id_fkey(name),
           to_branch:branches!stock_movement_history_to_branch_id_fkey(name),
           moved_by_user:users!stock_movement_history_moved_by_fkey(name)
         `)
+
+      // Filter by active branch (user's assigned branch or selected branch)
+      if (activeBranch) {
+        // Filter movements where the movement is from or to the active branch
+        query = query.or(`from_branch_id.eq.${activeBranch.id},to_branch_id.eq.${activeBranch.id}`)
+      }
+
+      const { data, error } = await query
         .order('movement_date', { ascending: false })
+      
       if (error) throw error
       
       // Transform the data to match the expected interface
-      const transformedData = data?.map(movement => ({
+      let transformedData = data?.map(movement => ({
         id: movement.id,
         movement_date: movement.movement_date,
         movement_type: movement.movement_type,
@@ -83,8 +143,19 @@ const LedgerBoard = () => {
         moved_by: movement.moved_by_user?.name || 'Unknown User',
         notes: movement.notes,
         for_dispenser: movement.for_dispenser,
-        product_name: movement.stock_items?.product_name || 'Unknown Product'
+        product_name: movement.stock_items?.product_name || 'Unknown Product',
+        stock_item_branch_id: movement.stock_items?.branch_id || null
       })) || []
+      
+      // Additional filtering: if activeBranch, filter by stock_item's branch_id
+      if (activeBranch) {
+        transformedData = transformedData.filter(movement => 
+          movement.stock_item_branch_id === activeBranch.id
+        )
+      }
+      
+      // Remove the temporary branch_id field
+      transformedData = transformedData.map(({ stock_item_branch_id, ...rest }) => rest)
       
       setMovements(transformedData)
     } catch (error: unknown) {
@@ -114,7 +185,7 @@ const LedgerBoard = () => {
     } finally {
       setLoading(false)
     }
-  }, [toast])
+  }, [toast, activeBranch])
 
   const loadDispenserPerformance = useCallback(async () => {
     setPerformanceLoading(true)
@@ -141,7 +212,7 @@ const LedgerBoard = () => {
       let dispensersError = null
       
       // First try direct query from users and user_roles tables
-      const { data: directDispensers, error: directError } = await supabase
+      let directQuery = supabase
         .from('users')
         .select(`
           id,
@@ -151,13 +222,27 @@ const LedgerBoard = () => {
         `)
         .eq('user_roles.role', 'dispenser')
       
+      // Filter by active branch (user's assigned branch or selected branch)
+      if (activeBranch) {
+        directQuery = directQuery.eq('user_roles.branch_id', activeBranch.id)
+      }
+      
+      const { data: directDispensers, error: directError } = await directQuery
+      
       if (directError) {
         console.error('Direct query failed, trying view:', directError)
         // Fallback to view
-        const { data: viewDispensers, error: viewError } = await supabase
+        let viewQuery = supabase
           .from('users_with_roles')
           .select('user_id, name, branch_name')
           .eq('role', 'dispenser')
+        
+        // Filter by active branch (user's assigned branch or selected branch)
+        if (activeBranch) {
+          viewQuery = viewQuery.eq('branch_id', activeBranch.id)
+        }
+        
+        const { data: viewDispensers, error: viewError } = await viewQuery
         
         dispensers = viewDispensers
         dispensersError = viewError
@@ -395,7 +480,7 @@ const LedgerBoard = () => {
     } finally {
       setPerformanceLoading(false)
     }
-  }, [selectedPeriod, toast])
+  }, [selectedPeriod, toast, activeBranch])
 
   useEffect(() => {
     if (user) {
@@ -459,7 +544,14 @@ const LedgerBoard = () => {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold">Ledger Board</h1>
-            <p className="text-muted-foreground">Track all stock movements and dispenser performance</p>
+            <p className="text-muted-foreground">
+              Track all stock movements and dispenser performance
+              {activeBranch && (
+                <span className="ml-2 text-primary font-semibold">
+                  • {activeBranch.name}
+                </span>
+              )}
+            </p>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-muted-foreground text-sm">

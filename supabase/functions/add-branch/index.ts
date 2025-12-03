@@ -12,11 +12,32 @@ serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
+  console.log('Add branch function called:', {
+    method: req.method,
+    url: req.url,
+    hasAuth: !!req.headers.get('Authorization')
+  })
+
   try {
+    // Validate required environment variables
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    
+    if (!supabaseUrl || !serviceRoleKey) {
+      console.error('Missing required environment variables')
+      return new Response(
+        JSON.stringify({ 
+          error: 'Server configuration error',
+          details: 'Missing required environment variables (SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY)'
+        }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     // Create Supabase client with service role key
     const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+      supabaseUrl,
+      serviceRoleKey,
       {
         auth: {
           autoRefreshToken: false,
@@ -113,10 +134,25 @@ serve(async (req) => {
     )
   } catch (error) {
     console.error('Unexpected error:', error)
-    return new Response(
-      JSON.stringify({ error: 'Internal server error', details: error.message }),
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const errorStack = error instanceof Error ? error.stack : undefined
+    
+    console.error('Error details:', {
+      message: errorMessage,
+      stack: errorStack,
+      name: error instanceof Error ? error.name : 'Unknown'
+    })
+    
+    const errorResponse = new Response(
+      JSON.stringify({ 
+        error: 'Internal server error', 
+        details: errorMessage
+      }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
+    
+    console.log('Returning error response to client')
+    return errorResponse
   }
 })
 

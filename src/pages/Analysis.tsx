@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useUserRole } from '@/hooks/useUserRole'
+import { useBranch } from '@/contexts/BranchContext'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { 
@@ -12,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
+import { Badge } from '@/components/ui/badge'
 import { supabase } from '@/integrations/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import {
@@ -100,13 +102,10 @@ interface ExpiryEfficiencyMetrics {
 
 const COLORS = ['#ff6384', '#ffb347', '#36a2eb', '#4bc0c0', '#9966ff', '#ffcd56']
 
-const allowedBranches = [
-  'Gayaza', 'Kira', 'Burton street', 'Gulu', 'Jinja 1', 'Jinja 2', 'Kabalagala', 'Kansanga', 'Kiruddu', 'Kisementi', 'Kintintale', 'Mbale', 'Mbarara', 'Naalya', 'Mukono', 'Munyonyo', 'Najjera', 'Ntinda', 'Wandegeya'
-];
-
 const Analysis = () => {
   const { user } = useAuth()
   const { userRole, loading: roleLoading } = useUserRole()
+  const { availableBranches } = useBranch()
   const [metrics, setMetrics] = useState<AnalysisMetrics>({
     totalValue: 0,
     potentialLoss: 0,
@@ -118,8 +117,10 @@ const Analysis = () => {
   const [branchPerformance, setBranchPerformance] = useState<BranchPerformance[]>([])
   const [selectedPeriod, setSelectedPeriod] = useState('month')
   const [selectedBranch, setSelectedBranch] = useState('all')
-  const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
+  
+  // Use availableBranches directly - no need for separate state
+  const branches = availableBranches.map(b => ({ id: b.id, name: b.name }))
   const { toast } = useToast()
   const [efficiencyMetrics, setEfficiencyMetrics] = useState<EfficiencyMetrics>({
     wastageRate: 0,
@@ -136,72 +137,39 @@ const Analysis = () => {
     averageChange: number;
     predictedValue: number;
   } | null>(null)
+  const [monthlyHistory, setMonthlyHistory] = useState<Array<{
+    period_start: string;
+    period_end: string;
+    total_stock_value: number;
+    items_expired: number;
+    items_near_expiry: number;
+    emergency_assignments: number;
+    tasks_completed: number;
+    dispensers_active: number;
+    items_sold: number;
+    items_moved: number;
+    total_movement_value: number;
+  }>>([])
+  const [dispenserHistory, setDispenserHistory] = useState<Array<{
+    dispenser_id: string;
+    dispenser_name: string;
+    period_start: string;
+    period_end: string;
+    tasks_assigned: number;
+    tasks_completed: number;
+    tasks_pending: number;
+    items_dispensed: number;
+    items_moved: number;
+    total_value_dispensed: number;
+    completion_rate: number;
+    performance_score: number;
+  }>>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
 
   const canAccessAnalysis = userRole && ['admin', 'system_admin', 'regional_manager', 'branch_system_admin'].includes(userRole)
 
-  const loadBranches = useCallback(async () => {
-    try {
-      const allowedBranches = [
-        'Gayaza', 'Kira', 'Burton street', 'Gulu', 'Jinja 1', 'Jinja 2', 
-        'Kabalagala', 'Kansanga', 'Kiruddu', 'Kisementi', 'Kintintale', 
-        'Mbale', 'Mbarara', 'Naalya', 'Mukono', 'Munyonyo', 'Najjera', 
-        'Ntinda', 'Wandegeya', 'Bbunga'
-      ];
-
-      // First, let's get all branches to see what we have
-      const { data: allBranches, error: fetchError } = await supabase
-        .from('branches')
-        .select('*')
-        .order('name');
-
-      if (fetchError) throw fetchError;
-
-      console.log('All branch names:', allBranches?.map(b => b.name));
-
-      // Check if Bbunga exists
-      const hasBbunga = allBranches?.some(b => b.name.toLowerCase() === 'bbunga');
-      console.log('Has Bbunga:', hasBbunga);
-
-      // If Bbunga doesn't exist, add it
-      if (!hasBbunga) {
-        console.log('Adding Bbunga branch...');
-        const { data: insertedBbunga, error: insertError } = await supabase
-          .from('branches')
-          .insert({
-            name: 'Bbunga',
-            code: 'BBUNGA',
-            region: 'Central'
-          })
-          .select();
-
-        if (insertError) {
-          console.error('Error inserting Bbunga:', insertError);
-          throw insertError;
-        }
-        console.log('Bbunga added:', insertedBbunga);
-      }
-
-      // Now get the final list of branches
-      const { data: finalBranches, error: finalError } = await supabase
-        .from('branches')
-        .select('id, name, code, region')
-        .in('name', allowedBranches)
-        .order('name');
-
-      if (finalError) throw finalError;
-
-      console.log('Final branch names:', finalBranches?.map(b => b.name));
-      setBranches(finalBranches || []);
-    } catch (error: unknown) {
-      const errorMessage = extractErrorMessage(error, "Failed to load branches");
-      console.error('Error loading branches:', errorMessage);
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    }
-  }, [toast]);
+  // No need for loadBranches - availableBranches from BranchContext already handles everything
+  // New branches will automatically appear when added to the database
 
   const loadMetrics = useCallback(async () => {
     setLoading(true)
@@ -297,7 +265,7 @@ const Analysis = () => {
         .from('stock_movement_history')
         .select(`
           *,
-          stock_items!inner(product_name, expiry_date, cost_price)
+          stock_items!inner(product_name, expiry_date, unit_price)
         `)
         .gte('movement_date', startDate.toISOString())
 
@@ -369,7 +337,14 @@ const Analysis = () => {
       setTrends(trendData)
 
       setMetrics(metrics)
-      setBranchPerformance(Object.values(branchMetrics).filter(b => allowedBranches.includes(b.branchName)))
+      // Show all branches - no filtering needed, new branches will automatically appear
+      setBranchPerformance(Object.values(branchMetrics))
+      
+      // Load monthly history if branch is selected
+      if (selectedBranch !== 'all') {
+        await loadMonthlyHistory()
+        await loadDispenserHistory()
+      }
     } catch (error) {
       const errorMessage = extractErrorMessage(error, "Failed to load analysis metrics")
       console.error('Error loading metrics:', errorMessage)
@@ -383,12 +358,149 @@ const Analysis = () => {
     }
   }, [selectedPeriod, selectedBranch, userRole, toast]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadMonthlyHistory = useCallback(async () => {
+    if (selectedBranch === 'all') return
+    
+    setHistoryLoading(true)
+    try {
+      // Get branch_id from selectedBranch (it might be branch name or ID)
+      let branchId = selectedBranch
+      if (selectedBranch && !selectedBranch.includes('-')) {
+        // It's a branch name, need to get ID
+        const { data: branchData } = await supabase
+          .from('branches')
+          .select('id')
+          .eq('name', selectedBranch)
+          .single()
+        
+        if (branchData) {
+          branchId = branchData.id
+        } else {
+          return
+        }
+      }
+
+      const { data, error } = await supabase.rpc('get_monthly_history', {
+        p_branch_id: branchId,
+        p_months_back: 12
+      })
+
+      if (error) throw error
+      setMonthlyHistory(data || [])
+    } catch (error: any) {
+      console.error('Error loading monthly history:', error)
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to load monthly history',
+        variant: 'destructive'
+      })
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [selectedBranch, toast])
+
+  const captureCurrentMonthSnapshot = useCallback(async () => {
+    if (selectedBranch === 'all') {
+      toast({
+        title: 'Error',
+        description: 'Please select a specific branch to capture snapshot',
+        variant: 'destructive'
+      })
+      return
+    }
+
+    try {
+      let branchId = selectedBranch
+      if (selectedBranch && !selectedBranch.includes('-')) {
+        const { data: branchData } = await supabase
+          .from('branches')
+          .select('id')
+          .eq('name', selectedBranch)
+          .single()
+        
+        if (branchData) {
+          branchId = branchData.id
+        } else {
+          throw new Error('Branch not found')
+        }
+      }
+
+      // First capture branch snapshot
+      const { data: branchData, error: branchError } = await supabase.rpc('capture_monthly_snapshot', {
+        p_branch_id: branchId,
+        p_month: null // Current month
+      })
+
+      if (branchError) throw branchError
+
+      // Then capture dispenser snapshots
+      const { error: dispenserError } = await supabase.rpc('capture_branch_dispensers_monthly_snapshot', {
+        p_branch_id: branchId,
+        p_month: null // Current month
+      })
+
+      if (dispenserError) {
+        console.error('Error capturing dispenser snapshots:', dispenserError)
+        // Don't fail if dispenser capture fails, just log it
+      }
+
+      toast({
+        title: 'Success',
+        description: 'Monthly snapshot captured successfully (branch and dispenser data)'
+      })
+
+      // Reload history
+      await loadMonthlyHistory()
+      await loadDispenserHistory()
+    } catch (error: any) {
+      console.error('Error capturing snapshot:', error)
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to capture monthly snapshot',
+        variant: 'destructive'
+      })
+    }
+  }, [selectedBranch, toast, loadMonthlyHistory])
+
+  const loadDispenserHistory = useCallback(async () => {
+    if (selectedBranch === 'all') return
+    
+    try {
+      // Get branch_id from selectedBranch
+      let branchId = selectedBranch
+      if (selectedBranch && !selectedBranch.includes('-')) {
+        const { data: branchData } = await supabase
+          .from('branches')
+          .select('id')
+          .eq('name', selectedBranch)
+          .single()
+        
+        if (branchData) {
+          branchId = branchData.id
+        } else {
+          return
+        }
+      }
+
+      const { data, error } = await supabase.rpc('get_dispenser_monthly_history', {
+        p_branch_id: branchId,
+        p_dispenser_id: null, // Get all dispensers
+        p_months_back: 12
+      })
+
+      if (error) throw error
+      setDispenserHistory(data || [])
+    } catch (error: any) {
+      console.error('Error loading dispenser history:', error)
+      // Don't show error toast for dispenser history, just log it
+    }
+  }, [selectedBranch])
+
   useEffect(() => {
     if (canAccessAnalysis) {
-      loadBranches()
       loadMetrics()
     }
-  }, [canAccessAnalysis, loadBranches, loadMetrics]);
+  }, [canAccessAnalysis, loadMetrics]);
 
   const handleDownload = () => {
     // Create CSV content
@@ -553,6 +665,7 @@ const Analysis = () => {
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="expiry">Expiry Management</TabsTrigger>
             <TabsTrigger value="branch">Branch Performance</TabsTrigger>
+            <TabsTrigger value="history">Monthly History</TabsTrigger>
             <TabsTrigger value="forecast">Forecast & Trends</TabsTrigger>
           </TabsList>
 
@@ -645,7 +758,7 @@ const Analysis = () => {
                 <CardContent>
                   <div className="h-[300px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={branchPerformance.filter(b => allowedBranches.includes(b.branchName))}>
+                      <BarChart data={branchPerformance}>
                         <CartesianGrid strokeDasharray="3 3" />
                         <XAxis dataKey="branchName" />
                         <YAxis tickFormatter={(value) => formatUGX(value)} />
@@ -851,7 +964,7 @@ const Analysis = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {branchPerformance.filter(b => allowedBranches.includes(b.branchName)).map(branch => (
+                            {branchPerformance.map(branch => (
                               <tr key={branch.branchName}>
                                 <td className="p-2 font-medium">{branch.branchName}</td>
                                 <td className="p-2">{branch.itemsNearExpiry}</td>
@@ -901,6 +1014,249 @@ const Analysis = () => {
                 <div>No branch performance data available yet.</div>
               </div>
             )}
+          </TabsContent>
+
+          <TabsContent value="history" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <div>
+                    <CardTitle>Monthly History</CardTitle>
+                    <CardDescription>
+                      Track performance metrics month-over-month for the selected branch. 
+                      <span className="font-semibold text-green-600"> History records are preserved even when stock items are deleted.</span>
+                    </CardDescription>
+                  </div>
+                  {selectedBranch !== 'all' && (
+                    <Button onClick={captureCurrentMonthSnapshot} variant="outline">
+                      <Calendar className="h-4 w-4 mr-2" />
+                      Capture Current Month
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {selectedBranch === 'all' ? (
+                  <Alert>
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                      Please select a specific branch to view monthly history.
+                    </AlertDescription>
+                  </Alert>
+                ) : historyLoading ? (
+                  <div className="text-center py-8">
+                    <Activity className="h-8 w-8 animate-spin mx-auto mb-2 text-muted-foreground" />
+                    <p className="text-muted-foreground">Loading monthly history...</p>
+                  </div>
+                ) : monthlyHistory.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Calendar className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                    <p className="text-lg font-medium mb-2">No Monthly History Available</p>
+                    <p className="text-muted-foreground mb-4">
+                      Capture your first monthly snapshot to start tracking history over time.
+                    </p>
+                    <Button onClick={captureCurrentMonthSnapshot}>
+                      <Calendar className="h-4 w-4 mr-2" />
+                      Capture Current Month Snapshot
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Monthly History Chart */}
+                    <div className="h-[400px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={monthlyHistory.map(h => ({
+                          month: format(new Date(h.period_start), 'MMM yyyy'),
+                          stockValue: parseFloat(h.total_stock_value?.toString() || '0'),
+                          itemsExpired: h.items_expired || 0,
+                          itemsNearExpiry: h.items_near_expiry || 0,
+                          itemsSold: h.items_sold || 0,
+                          movementValue: parseFloat(h.total_movement_value?.toString() || '0')
+                        }))}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="month" />
+                          <YAxis yAxisId="left" />
+                          <YAxis yAxisId="right" orientation="right" />
+                          <Tooltip 
+                            formatter={(value: number, name: string) => {
+                              if (name === 'stockValue' || name === 'movementValue') {
+                                return formatUGX(value)
+                              }
+                              return value
+                            }}
+                          />
+                          <Legend />
+                          <Area 
+                            yAxisId="left"
+                            type="monotone" 
+                            dataKey="stockValue" 
+                            name="Stock Value" 
+                            stroke="#36a2eb" 
+                            fill="#36a2eb" 
+                            fillOpacity={0.6}
+                          />
+                          <Area 
+                            yAxisId="right"
+                            type="monotone" 
+                            dataKey="itemsExpired" 
+                            name="Items Expired" 
+                            stroke="#ff6384" 
+                            fill="#ff6384" 
+                            fillOpacity={0.6}
+                          />
+                          <Area 
+                            yAxisId="right"
+                            type="monotone" 
+                            dataKey="itemsNearExpiry" 
+                            name="Items Near Expiry" 
+                            stroke="#ffb347" 
+                            fill="#ffb347" 
+                            fillOpacity={0.6}
+                          />
+                          <Area 
+                            yAxisId="left"
+                            type="monotone" 
+                            dataKey="movementValue" 
+                            name="Movement Value" 
+                            stroke="#4bc0c0" 
+                            fill="#4bc0c0" 
+                            fillOpacity={0.6}
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Monthly History Table */}
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-left text-sm">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="p-3 font-medium">Month</th>
+                            <th className="p-3 font-medium">Stock Value</th>
+                            <th className="p-3 font-medium">Expired</th>
+                            <th className="p-3 font-medium">Near Expiry</th>
+                            <th className="p-3 font-medium">Items Sold</th>
+                            <th className="p-3 font-medium">Movement Value</th>
+                            <th className="p-3 font-medium">Tasks Completed</th>
+                            <th className="p-3 font-medium">Active Dispensers</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {monthlyHistory.map((month, index) => {
+                            const prevMonth = monthlyHistory[index + 1]
+                            const stockValueChange = prevMonth 
+                              ? ((parseFloat(month.total_stock_value?.toString() || '0') - parseFloat(prevMonth.total_stock_value?.toString() || '0')) / parseFloat(prevMonth.total_stock_value?.toString() || '1')) * 100
+                              : 0
+                            
+                            return (
+                              <tr key={month.period_start} className="border-b">
+                                <td className="p-3 font-medium">
+                                  {format(new Date(month.period_start), 'MMM yyyy')}
+                                </td>
+                                <td className="p-3">
+                                  <div className="flex items-center gap-2">
+                                    <span>{formatUGX(parseFloat(month.total_stock_value?.toString() || '0'))}</span>
+                                    {prevMonth && (
+                                      <span className={`text-xs ${stockValueChange >= 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                        {stockValueChange >= 0 ? '↑' : '↓'} {Math.abs(stockValueChange).toFixed(1)}%
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="p-3">{month.items_expired || 0}</td>
+                                <td className="p-3">{month.items_near_expiry || 0}</td>
+                                <td className="p-3">{month.items_sold || 0}</td>
+                                <td className="p-3">{formatUGX(parseFloat(month.total_movement_value?.toString() || '0'))}</td>
+                                <td className="p-3">{month.tasks_completed || 0}</td>
+                                <td className="p-3">{month.dispensers_active || 0}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Dispenser History Section */}
+                    {dispenserHistory.length > 0 && (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>Dispenser Performance History</CardTitle>
+                          <CardDescription>
+                            Monthly performance metrics for all dispensers. This history is preserved even when stock items are deleted.
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-4">
+                            {/* Group dispenser history by month */}
+                            {(() => {
+                              const groupedByMonth = dispenserHistory.reduce((acc, record) => {
+                                const monthKey = format(new Date(record.period_start), 'MMM yyyy')
+                                if (!acc[monthKey]) {
+                                  acc[monthKey] = []
+                                }
+                                acc[monthKey].push(record)
+                                return acc
+                              }, {} as Record<string, typeof dispenserHistory>)
+
+                              return Object.entries(groupedByMonth).map(([month, records]) => (
+                                <div key={month} className="border rounded-lg p-4">
+                                  <h3 className="font-semibold mb-3 text-lg">{month}</h3>
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full text-left text-sm">
+                                      <thead>
+                                        <tr className="border-b">
+                                          <th className="p-2 font-medium">Dispenser</th>
+                                          <th className="p-2 font-medium">Tasks Assigned</th>
+                                          <th className="p-2 font-medium">Tasks Completed</th>
+                                          <th className="p-2 font-medium">Completion Rate</th>
+                                          <th className="p-2 font-medium">Items Dispensed</th>
+                                          <th className="p-2 font-medium">Value Dispensed</th>
+                                          <th className="p-2 font-medium">Performance Score</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {records.map((record) => (
+                                          <tr key={`${record.dispenser_id}-${record.period_start}`} className="border-b">
+                                            <td className="p-2 font-medium">{record.dispenser_name || 'Unknown'}</td>
+                                            <td className="p-2">{record.tasks_assigned || 0}</td>
+                                            <td className="p-2">{record.tasks_completed || 0}</td>
+                                            <td className="p-2">
+                                              <div className="flex items-center gap-2">
+                                                <span>{record.completion_rate?.toFixed(1) || 0}%</span>
+                                                <Progress 
+                                                  value={record.completion_rate || 0} 
+                                                  className="w-16 h-2"
+                                                />
+                                              </div>
+                                            </td>
+                                            <td className="p-2">{record.items_dispensed || 0}</td>
+                                            <td className="p-2">{formatUGX(parseFloat(record.total_value_dispensed?.toString() || '0'))}</td>
+                                            <td className="p-2">
+                                              <Badge 
+                                                variant={
+                                                  (record.performance_score || 0) >= 80 ? 'default' :
+                                                  (record.performance_score || 0) >= 60 ? 'secondary' : 'destructive'
+                                                }
+                                              >
+                                                {record.performance_score?.toFixed(1) || 0}
+                                              </Badge>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              ))
+                            })()}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="forecast" className="space-y-4">

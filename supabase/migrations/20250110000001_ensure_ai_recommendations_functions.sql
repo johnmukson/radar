@@ -1,169 +1,10 @@
 -- ============================================================================
--- AI-Powered Recommendations
--- Migration: 20250107000004_ai_recommendations.sql
--- Date: January 2025
--- Description: Creates AI recommendations system with database table, functions, and RLS policies
+-- Ensure AI Recommendations Functions Exist
+-- Migration: 20250110000001_ensure_ai_recommendations_functions.sql
+-- Description: Creates generate_ai_recommendations and update_recommendation_status functions
 -- ============================================================================
 
--- ----------------------------------------------------------------------------
--- 1. AI Recommendations Table
--- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.ai_recommendations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  branch_id UUID REFERENCES public.branches(id) ON DELETE CASCADE,
-  recommendation_type TEXT NOT NULL CHECK (recommendation_type IN (
-    'stock_optimization',
-    'expiry_warning',
-    'low_stock_alert',
-    'reorder_suggestion',
-    'cost_reduction',
-    'inventory_analysis',
-    'custom'
-  )),
-  title TEXT NOT NULL,
-  recommendation TEXT NOT NULL,
-  priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'critical')) DEFAULT 'medium',
-  status TEXT NOT NULL CHECK (status IN ('pending', 'reviewed', 'implemented', 'dismissed')) DEFAULT 'pending',
-  metadata JSONB DEFAULT '{}'::jsonb,
-  impact_score DECIMAL(5,2) DEFAULT 0,
-  estimated_savings DECIMAL(10,2),
-  estimated_time_savings INTEGER,
-  related_stock_items UUID[],
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  reviewed_at TIMESTAMPTZ,
-  reviewed_by UUID REFERENCES auth.users(id),
-  implemented_at TIMESTAMPTZ,
-  implemented_by UUID REFERENCES auth.users(id)
-);
-
--- Indexes
-CREATE INDEX idx_ai_recommendations_branch_id ON public.ai_recommendations(branch_id);
-CREATE INDEX idx_ai_recommendations_recommendation_type ON public.ai_recommendations(recommendation_type);
-CREATE INDEX idx_ai_recommendations_status ON public.ai_recommendations(status);
-CREATE INDEX idx_ai_recommendations_priority ON public.ai_recommendations(priority);
-CREATE INDEX idx_ai_recommendations_created_at ON public.ai_recommendations(created_at DESC);
-
--- Updated at trigger
-CREATE TRIGGER update_ai_recommendations_updated_at
-  BEFORE UPDATE ON public.ai_recommendations
-  FOR EACH ROW
-  EXECUTE FUNCTION public.update_updated_at_column();
-
--- Comment
-COMMENT ON TABLE public.ai_recommendations IS 'AI-powered recommendations for inventory management, stock optimization, and cost reduction';
-
--- ----------------------------------------------------------------------------
--- 2. RLS Policies for AI Recommendations
--- ----------------------------------------------------------------------------
-ALTER TABLE public.ai_recommendations ENABLE ROW LEVEL SECURITY;
-
--- System admins can manage all AI recommendations
-CREATE POLICY "System admins can manage all AI recommendations"
-  ON public.ai_recommendations
-  FOR ALL
-  USING (public.has_role(auth.uid(), 'system_admin'))
-  WITH CHECK (public.has_role(auth.uid(), 'system_admin'));
-
--- Regional managers can view and manage recommendations for their regions
-CREATE POLICY "Regional managers can manage regional recommendations"
-  ON public.ai_recommendations
-  FOR ALL
-  USING (
-    public.has_role(auth.uid(), 'regional_manager') AND
-    (
-      branch_id IS NULL OR
-      EXISTS (
-        SELECT 1 FROM public.user_roles ur
-        JOIN public.branches b ON b.id = ur.branch_id
-        WHERE ur.user_id = auth.uid()
-        AND b.region = (SELECT region FROM public.branches WHERE id = ai_recommendations.branch_id)
-      )
-    )
-  )
-  WITH CHECK (
-    public.has_role(auth.uid(), 'regional_manager') AND
-    (
-      branch_id IS NULL OR
-      EXISTS (
-        SELECT 1 FROM public.user_roles ur
-        JOIN public.branches b ON b.id = ur.branch_id
-        WHERE ur.user_id = auth.uid()
-        AND b.region = (SELECT region FROM public.branches WHERE id = ai_recommendations.branch_id)
-      )
-    )
-  );
-
--- Branch system admins can view and manage recommendations for their branch
-CREATE POLICY "Branch system admins can manage branch recommendations"
-  ON public.ai_recommendations
-  FOR ALL
-  USING (
-    public.has_role(auth.uid(), 'branch_system_admin') AND
-    (
-      branch_id IS NULL OR
-      EXISTS (
-        SELECT 1 FROM public.user_roles ur
-        WHERE ur.user_id = auth.uid()
-        AND ur.branch_id = ai_recommendations.branch_id
-      )
-    )
-  )
-  WITH CHECK (
-    public.has_role(auth.uid(), 'branch_system_admin') AND
-    (
-      branch_id IS NULL OR
-      EXISTS (
-        SELECT 1 FROM public.user_roles ur
-        WHERE ur.user_id = auth.uid()
-        AND ur.branch_id = ai_recommendations.branch_id
-      )
-    )
-  );
-
--- Branch managers can view and manage recommendations for their branch
-CREATE POLICY "Branch managers can manage branch recommendations"
-  ON public.ai_recommendations
-  FOR ALL
-  USING (
-    public.has_role(auth.uid(), 'branch_manager') AND
-    (
-      branch_id IS NULL OR
-      EXISTS (
-        SELECT 1 FROM public.user_roles ur
-        WHERE ur.user_id = auth.uid()
-        AND ur.branch_id = ai_recommendations.branch_id
-      )
-    )
-  )
-  WITH CHECK (
-    public.has_role(auth.uid(), 'branch_manager') AND
-    (
-      branch_id IS NULL OR
-      EXISTS (
-        SELECT 1 FROM public.user_roles ur
-        WHERE ur.user_id = auth.uid()
-        AND ur.branch_id = ai_recommendations.branch_id
-      )
-    )
-  );
-
--- Users can view recommendations for their branch
-CREATE POLICY "Users can view branch recommendations"
-  ON public.ai_recommendations
-  FOR SELECT
-  USING (
-    branch_id IS NULL OR
-    EXISTS (
-      SELECT 1 FROM public.user_roles ur
-      WHERE ur.user_id = auth.uid()
-      AND ur.branch_id = ai_recommendations.branch_id
-    )
-  );
-
--- ----------------------------------------------------------------------------
--- 3. Function to Generate AI Recommendations
--- ----------------------------------------------------------------------------
+-- Function to Generate AI Recommendations
 CREATE OR REPLACE FUNCTION public.generate_ai_recommendations(
   p_branch_id UUID DEFAULT NULL,
   p_recommendation_type TEXT DEFAULT NULL
@@ -363,12 +204,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Comment
 COMMENT ON FUNCTION public.generate_ai_recommendations IS 'Generates AI-powered recommendations based on stock data analysis including expiry warnings, low stock alerts, inventory analysis, and cost reduction opportunities';
 
--- ----------------------------------------------------------------------------
--- 4. Function to Update Recommendation Status
--- ----------------------------------------------------------------------------
+-- Function to Update Recommendation Status
 CREATE OR REPLACE FUNCTION public.update_recommendation_status(
   p_recommendation_id UUID,
   p_status TEXT,
@@ -388,5 +226,5 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Comment
 COMMENT ON FUNCTION public.update_recommendation_status IS 'Updates the status of an AI recommendation and tracks who reviewed/implemented it';
+

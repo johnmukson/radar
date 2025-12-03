@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useBranch } from '@/contexts/BranchContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -11,26 +12,32 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import * as XLSX from 'xlsx'
 
 interface DormantStockItem {
-  product_id: number
+  product_id: string | number
   product_name: string
   excess_value: number
   excess_qty: number
   sales: number
   days: number
   classification: string
+  branch_id?: string
 }
 
 
 interface DormantStockFileUploadProps {
   onUploadComplete?: () => void
+  branchId?: string | null
 }
 
-const DormantStockFileUpload: React.FC<DormantStockFileUploadProps> = ({ onUploadComplete }) => {
+const DormantStockFileUpload: React.FC<DormantStockFileUploadProps> = ({ onUploadComplete, branchId }) => {
+  const { selectedBranch } = useBranch()
   const [file, setFile] = useState<File | null>(null)
   const [loading, setLoading] = useState(false)
   const [processedData, setProcessedData] = useState<DormantStockItem[]>([])
   const [showPreview, setShowPreview] = useState(false)
   const { toast } = useToast()
+  
+  // Use branchId prop if provided, otherwise use selectedBranch from context
+  const activeBranchId = branchId || selectedBranch?.id || null
 
 
 
@@ -38,6 +45,14 @@ const DormantStockFileUpload: React.FC<DormantStockFileUploadProps> = ({ onUploa
     const file = event.target.files?.[0]
     if (!file) return
 
+    if (!activeBranchId) {
+      toast({
+        title: "Error",
+        description: "Please select a branch before uploading dormant stock.",
+        variant: "destructive",
+      })
+      return
+    }
 
     setFile(file)
     setLoading(true)
@@ -331,12 +346,22 @@ const DormantStockFileUpload: React.FC<DormantStockFileUploadProps> = ({ onUploa
   const uploadToDatabase = async (dataToUpload?: DormantStockItem[]) => {
     const itemsToUpload = dataToUpload || processedData
     
+    if (!activeBranchId) {
+      toast({
+        title: "Error",
+        description: "No branch selected. Cannot upload dormant stock.",
+        variant: "destructive",
+      })
+      return
+    }
+    
     setLoading(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
       
       const itemsToInsert = itemsToUpload.map(item => ({
         ...item,
+        branch_id: activeBranchId,
         uploaded_by: user?.id
       }))
 

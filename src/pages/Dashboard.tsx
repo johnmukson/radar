@@ -4,7 +4,7 @@ import { useUserRole } from '@/hooks/useUserRole'
 import { useBranch } from '@/contexts/BranchContext'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Shield, AlertTriangle, CalendarDays, Edit, Crown, Settings, Package, Users, Trash2, Download, Building2, Sparkles } from 'lucide-react'
+import { Shield, AlertTriangle, CalendarDays, Edit, Crown, Settings, Package, Users, Trash2, Download, Building2 } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import StockList from '@/components/StockList'
 import AdminManager from '@/components/AdminManager'
@@ -20,7 +20,6 @@ import ProductSearch from '@/components/ProductSearch'
 import AdvancedSearch from '@/components/search/AdvancedSearch'
 import BulkOperations from '@/components/bulk/BulkOperations'
 import ExportManager from '@/components/export/ExportManager'
-import AiRecommendationsManager from '@/components/ai/AiRecommendationsManager'
 import { Badge } from '@/components/ui/badge'
 
 const Dashboard = () => {
@@ -28,7 +27,7 @@ const Dashboard = () => {
   const { hasAdminAccess, userRole, loading: roleLoading } = useUserRole();
   const { selectedBranch } = useBranch();
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState<'list' | 'search' | 'advanced-search' | 'bulk' | 'export' | 'ai-recommendations' | 'admin' | 'emergency'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'search' | 'advanced-search' | 'bulk' | 'export' | 'admin' | 'emergency'>('list');
 
   useEffect(() => {
     if (location.state?.activeTab) {
@@ -64,17 +63,6 @@ const Dashboard = () => {
             )}
           </div>
           <div className="flex items-center gap-3">
-            {!roleLoading && (userRole === 'regional_manager' || userRole === 'system_admin') && (
-              <Button
-                onClick={() => setActiveTab('ai-recommendations')}
-                variant="default"
-                size="sm"
-                className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-semibold shadow-lg"
-              >
-                <Sparkles className="h-4 w-4" />
-                AI Insights
-              </Button>
-            )}
             <div className="text-sm text-muted-foreground">
               Welcome, {user?.email}
             </div>
@@ -116,11 +104,6 @@ const Dashboard = () => {
               Export Data
             </button>
           )}
-          {!roleLoading && (userRole === 'regional_manager' || userRole === 'system_admin') && (
-            <button onClick={() => setActiveTab('ai-recommendations')} className={`px-4 py-2 text-sm font-medium ${activeTab === 'ai-recommendations' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}>
-              AI Insights
-            </button>
-          )}
           {hasAdminAccess && (
             <>
               <button onClick={() => setActiveTab('emergency')} className={`px-4 py-2 text-sm font-medium ${activeTab === 'emergency' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}>
@@ -141,7 +124,6 @@ const Dashboard = () => {
           {activeTab === 'advanced-search' && <AdvancedSearch />}
           {activeTab === 'bulk' && hasAdminAccess && <BulkOperations />}
           {activeTab === 'export' && hasAdminAccess && <ExportManager />}
-          {activeTab === 'ai-recommendations' && !roleLoading && (userRole === 'regional_manager' || userRole === 'system_admin') && <AiRecommendationsManager />}
           {activeTab === 'admin' && hasAdminAccess && <AdminManager />}
           {activeTab === 'emergency' && hasAdminAccess && <EmergencyManager />}
         </div>

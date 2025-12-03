@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
+import AiChatInterface from './AiChatInterface'
 
 interface AiRecommendation {
   id: string
@@ -63,20 +64,51 @@ const AiRecommendationsManager: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [filterPriority, setFilterPriority] = useState<string>('all')
   const [filterType, setFilterType] = useState<string>('all')
+  const [filterMonth, setFilterMonth] = useState<string>('all')
+  const [showForecast, setShowForecast] = useState(false)
+  const [forecastData, setForecastData] = useState<any>(null)
+  const [loadingForecast, setLoadingForecast] = useState(false)
 
   const canViewRecommendations = hasAdminAccess || isSystemAdmin || isRegionalManager
 
+  // Debug logging
   useEffect(() => {
+    console.log('AI Recommendations Manager mounted/updated:', {
+      selectedBranch: selectedBranch?.name,
+      isSystemAdmin,
+      isRegionalManager,
+      hasAdminAccess,
+      canViewRecommendations,
+      user: user?.email
+    })
+  }, [selectedBranch, isSystemAdmin, isRegionalManager, hasAdminAccess, canViewRecommendations, user])
+
+  useEffect(() => {
+    console.log('AI Recommendations Manager effect:', {
+      selectedBranch: selectedBranch?.id,
+      canViewRecommendations,
+      filterStatus,
+      filterPriority,
+      filterType
+    })
+    
     if (selectedBranch && canViewRecommendations) {
       fetchRecommendations()
+    } else {
+      console.log('Skipping fetch - missing branch or permissions')
+      setRecommendations([])
     }
-  }, [selectedBranch, canViewRecommendations, filterStatus, filterPriority, filterType])
+  }, [selectedBranch, canViewRecommendations, filterStatus, filterPriority, filterType, filterMonth])
 
   const fetchRecommendations = async () => {
-    if (!selectedBranch) return
+    if (!selectedBranch) {
+      console.log('No branch selected, skipping fetch')
+      return
+    }
 
     setLoading(true)
     try {
+      console.log('Fetching recommendations for branch:', selectedBranch.id)
       let query = supabase
         .from('ai_recommendations')
         .select('*')
@@ -98,8 +130,24 @@ const AiRecommendationsManager: React.FC = () => {
 
       const { data, error } = await query
 
-      if (error) throw error
-      setRecommendations(data || [])
+      if (error) {
+        console.error('Error fetching recommendations:', error)
+        throw error
+      }
+      
+      console.log('Fetched recommendations:', data?.length || 0)
+      // Map and validate data to ensure correct types
+      const typedRecommendations: AiRecommendation[] = (data || []).map((rec: any) => ({
+        ...rec,
+        priority: (['low', 'medium', 'high', 'critical'].includes(rec.priority) 
+          ? rec.priority 
+          : 'medium') as 'low' | 'medium' | 'high' | 'critical'
+      }))
+      setRecommendations(typedRecommendations)
+      
+      if (!data || data.length === 0) {
+        console.log('No recommendations found in database')
+      }
     } catch (error: any) {
       console.error('Error fetching recommendations:', error)
       toast({
@@ -107,6 +155,7 @@ const AiRecommendationsManager: React.FC = () => {
         description: error.message || 'Failed to fetch recommendations',
         variant: 'destructive'
       })
+      setRecommendations([])
     } finally {
       setLoading(false)
     }
@@ -117,44 +166,23 @@ const AiRecommendationsManager: React.FC = () => {
 
     setGenerating(true)
     try {
-      // Call the generate function
-      const { data, error } = await supabase.rpc('generate_ai_recommendations', {
-        p_branch_id: selectedBranch.id,
-        p_recommendation_type: null
+      // Use Edge Function instead of RPC for better AI-powered recommendations
+      const { data, error } = await supabase.functions.invoke('ai-alert', {
+        body: {
+          branch_ids: [selectedBranch.id],
+          recommendation_type: null
+        }
       })
 
       if (error) {
-        console.error('Error calling generate_ai_recommendations:', error)
+        console.error('Error calling ai-alert function:', error)
         throw error
       }
 
-      // Insert recommendations into database
-      if (data && data.length > 0) {
-        const recommendationsToInsert = data.map((rec: any) => ({
-          branch_id: rec.branch_id || selectedBranch.id,
-          recommendation_type: rec.recommendation_type,
-          title: rec.title,
-          recommendation: rec.recommendation,
-          priority: rec.priority || 'medium',
-          status: 'pending',
-          metadata: rec.metadata || {},
-          impact_score: rec.impact_score || 0,
-          estimated_savings: rec.metadata?.expiring_value || rec.metadata?.potential_loss || null,
-          related_stock_items: rec.metadata?.stock_item_ids || null
-        }))
-
-        const { error: insertError } = await supabase
-          .from('ai_recommendations')
-          .insert(recommendationsToInsert)
-
-        if (insertError) {
-          console.error('Error inserting recommendations:', insertError)
-          throw insertError
-        }
-
+      if (data && data.success) {
         toast({
           title: 'Success',
-          description: `Generated ${recommendationsToInsert.length} new recommendations`
+          description: `Generated ${data.count || 0} new recommendations`
         })
 
         await fetchRecommendations()
@@ -173,6 +201,49 @@ const AiRecommendationsManager: React.FC = () => {
       })
     } finally {
       setGenerating(false)
+    }
+  }
+
+  const generateForecast = async () => {
+    if (!selectedBranch || !user) return
+
+    setLoadingForecast(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('forecast', {
+        body: {
+          branch_id: selectedBranch.id,
+          months_ahead: filterMonth === 'all' ? 6 : parseInt(filterMonth)
+        }
+      })
+
+      if (error) {
+        console.error('Error calling forecast function:', error)
+        throw error
+      }
+
+      if (data && data.success) {
+        setForecastData(data.forecast)
+        setShowForecast(true)
+        toast({
+          title: 'Success',
+          description: 'Forecast generated successfully'
+        })
+      } else {
+        toast({
+          title: 'Error',
+          description: 'Failed to generate forecast',
+          variant: 'destructive'
+        })
+      }
+    } catch (error: any) {
+      console.error('Error generating forecast:', error)
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to generate forecast',
+        variant: 'destructive'
+      })
+    } finally {
+      setLoadingForecast(false)
     }
   }
 
@@ -239,6 +310,13 @@ const AiRecommendationsManager: React.FC = () => {
     if (filterStatus !== 'all' && rec.status !== filterStatus) return false
     if (filterPriority !== 'all' && rec.priority !== filterPriority) return false
     if (filterType !== 'all' && rec.recommendation_type !== filterType) return false
+    if (filterMonth !== 'all') {
+      // Filter by month based on created_at or forecast month in metadata
+      const recDate = new Date(rec.created_at)
+      const targetMonth = parseInt(filterMonth)
+      const recMonth = recDate.getMonth() + 1 // getMonth() returns 0-11
+      if (recMonth !== targetMonth) return false
+    }
     return true
   })
 
@@ -273,8 +351,15 @@ const AiRecommendationsManager: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <Card>
+    <div className="space-y-6 p-4">
+      <Tabs defaultValue="recommendations" className="w-full">
+        <TabsList className="grid w-full grid-cols-2 mb-6">
+          <TabsTrigger value="recommendations">Recommendations</TabsTrigger>
+          <TabsTrigger value="chat">AI Chat Assistant</TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="recommendations" className="space-y-6">
+          <Card className="border-2">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="flex items-center gap-2 text-2xl font-bold">
@@ -296,7 +381,7 @@ const AiRecommendationsManager: React.FC = () => {
         </CardHeader>
         <CardContent>
           {/* Filters */}
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-4 gap-4 mb-6">
             <div>
               <label className="text-sm font-medium mb-2 block">Status</label>
               <Select value={filterStatus} onValueChange={setFilterStatus}>
@@ -340,17 +425,143 @@ const AiRecommendationsManager: React.FC = () => {
                   <SelectItem value="cost_reduction">Cost Reduction</SelectItem>
                   <SelectItem value="inventory_analysis">Inventory Analysis</SelectItem>
                   <SelectItem value="reorder_suggestion">Reorder Suggestion</SelectItem>
+                  <SelectItem value="forecast">Forecast</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block">Month</label>
+              <Select value={filterMonth} onValueChange={setFilterMonth}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Months</SelectItem>
+                  <SelectItem value="1">January</SelectItem>
+                  <SelectItem value="2">February</SelectItem>
+                  <SelectItem value="3">March</SelectItem>
+                  <SelectItem value="4">April</SelectItem>
+                  <SelectItem value="5">May</SelectItem>
+                  <SelectItem value="6">June</SelectItem>
+                  <SelectItem value="7">July</SelectItem>
+                  <SelectItem value="8">August</SelectItem>
+                  <SelectItem value="9">September</SelectItem>
+                  <SelectItem value="10">October</SelectItem>
+                  <SelectItem value="11">November</SelectItem>
+                  <SelectItem value="12">December</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
+          {/* Forecast Button */}
+          <div className="mb-6 flex justify-end gap-2">
+            <Button
+              onClick={generateForecast}
+              disabled={loadingForecast}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              <TrendingUp className={`h-4 w-4 ${loadingForecast ? 'animate-spin' : ''}`} />
+              {loadingForecast ? 'Generating Forecast...' : 'Generate Forecast'}
+            </Button>
+          </div>
+
+          {/* Forecast Display */}
+          {showForecast && forecastData && (
+            <Card className="mb-6 border-blue-200 bg-blue-50/50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-blue-600" />
+                  Forecast Analysis
+                </CardTitle>
+                <CardDescription>
+                  Predictive insights for the next {filterMonth === 'all' ? '6' : filterMonth} months
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {forecastData.expiry_forecast && (
+                  <div>
+                    <h4 className="font-semibold mb-2">Expiry Risk Forecast</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      {Object.entries(forecastData.expiry_forecast).map(([month, data]: [string, any]) => (
+                        <div key={month} className="p-3 bg-white rounded border">
+                          <div className="font-medium">{month}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {data.count} items expiring (Value: UGX {data.value?.toLocaleString() || 0})
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {forecastData.demand_forecast && (
+                  <div>
+                    <h4 className="font-semibold mb-2">Demand Forecast</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      {Object.entries(forecastData.demand_forecast).map(([month, data]: [string, any]) => (
+                        <div key={month} className="p-3 bg-white rounded border">
+                          <div className="font-medium">{month}</div>
+                          <div className="text-sm text-muted-foreground">
+                            Expected demand: {data.expected_demand} units
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {forecastData.reorder_points && forecastData.reorder_points.length > 0 && (
+                  <div>
+                    <h4 className="font-semibold mb-2">Recommended Reorder Points</h4>
+                    <div className="space-y-2">
+                      {forecastData.reorder_points.slice(0, 5).map((item: any, idx: number) => (
+                        <div key={idx} className="p-2 bg-white rounded border text-sm">
+                          <span className="font-medium">{item.product_name}</span> - 
+                          Reorder when stock reaches {item.reorder_point} units
+                          (Current: {item.current_stock} units)
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowForecast(false)}
+                  className="w-full"
+                >
+                  Hide Forecast
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Recommendations Table */}
           {loading ? (
-            <div className="text-center p-8">Loading...</div>
+            <div className="text-center p-8">
+              <RefreshCw className="h-6 w-6 animate-spin mx-auto mb-2" />
+              <p className="text-muted-foreground">Loading recommendations...</p>
+            </div>
           ) : filteredRecommendations.length === 0 ? (
-            <div className="text-center text-muted-foreground p-8">
-              No recommendations found. Click "Generate Recommendations" to create new ones.
+            <div className="text-center p-8 space-y-4">
+              <Sparkles className="h-12 w-12 mx-auto text-muted-foreground opacity-50" />
+              <div>
+                <p className="text-lg font-medium mb-2">No recommendations found</p>
+                <p className="text-sm text-muted-foreground mb-4">
+                  {recommendations.length === 0 
+                    ? "You don't have any recommendations yet. Generate your first set of AI-powered insights!"
+                    : "No recommendations match your current filters. Try adjusting your filters or generate new recommendations."}
+                </p>
+                <Button
+                  onClick={generateRecommendations}
+                  disabled={generating}
+                  variant="default"
+                  className="flex items-center gap-2 mx-auto"
+                >
+                  <RefreshCw className={`h-4 w-4 ${generating ? 'animate-spin' : ''}`} />
+                  {generating ? 'Generating...' : 'Generate Recommendations'}
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="border rounded-lg">
@@ -423,6 +634,21 @@ const AiRecommendationsManager: React.FC = () => {
           )}
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="chat">
+          <AiChatInterface 
+            recommendationContext={selectedRecommendation ? {
+              id: selectedRecommendation.id,
+              title: selectedRecommendation.title,
+              recommendation: selectedRecommendation.recommendation,
+              recommendation_type: selectedRecommendation.recommendation_type,
+              priority: selectedRecommendation.priority,
+              metadata: selectedRecommendation.metadata
+            } : null}
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* Details Dialog */}
       <Dialog open={showDetailsDialog} onOpenChange={setShowDetailsDialog}>

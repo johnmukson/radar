@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { useAuth } from '@/contexts/AuthContext'
+import { useBranch } from '@/contexts/BranchContext'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -34,7 +36,9 @@ import {
   MoreHorizontal,
   ChevronDown,
   ArrowUpDown,
-  X
+  X,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react'
 import DormantStockFileUpload from '@/components/dormant-stock/DormantStockFileUpload'
 import { Tables } from '@/integrations/supabase/types'
@@ -43,6 +47,9 @@ type DormantStockItem = Tables<'dormant_stock'>
 
 
 const DormantStock: React.FC = () => {
+  const { user } = useAuth()
+  const { selectedBranch, isSystemAdmin, isRegionalManager, availableBranches } = useBranch()
+  const [userAssignedBranch, setUserAssignedBranch] = useState<{ id: string; name: string } | null>(null)
   const [dormantStock, setDormantStock] = useState<DormantStockItem[]>([])
   const [filteredStock, setFilteredStock] = useState<DormantStockItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -62,18 +69,69 @@ const DormantStock: React.FC = () => {
   const [showPOMDetails, setShowPOMDetails] = useState(false)
   const [showOTCDetails, setShowOTCDetails] = useState(false)
   const [showPOMOTCDetails, setShowPOMOTCDetails] = useState(false)
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(50)
+  const [totalItems, setTotalItems] = useState(0)
+  
   const { toast } = useToast()
+
+  // Determine which branch to use: user's assigned branch (for non-admins) or selectedBranch (for admins)
+  const activeBranch = isSystemAdmin || isRegionalManager 
+    ? selectedBranch 
+    : (userAssignedBranch ? { id: userAssignedBranch.id, name: userAssignedBranch.name } : selectedBranch)
+
+  // Load user's assigned branch from their role
+  useEffect(() => {
+    const loadUserBranch = async () => {
+      if (!user || isSystemAdmin || isRegionalManager) {
+        setUserAssignedBranch(null)
+        return
+      }
+
+      try {
+        const { data: userRoles, error } = await supabase
+          .from('user_roles')
+          .select(`
+            branch_id,
+            branch:branches!inner(id, name, code, status)
+          `)
+          .eq('user_id', user.id)
+          .not('branch_id', 'is', null)
+          .eq('branch.status', 'active')
+          .limit(1)
+
+        if (error) throw error
+
+        if (userRoles && userRoles.length > 0) {
+          const branch = userRoles[0].branch
+          setUserAssignedBranch({
+            id: branch.id,
+            name: branch.name
+          })
+        } else {
+          setUserAssignedBranch(null)
+        }
+      } catch (error) {
+        console.error('Error loading user branch:', error)
+        setUserAssignedBranch(null)
+      }
+    }
+
+    loadUserBranch()
+  }, [user, isSystemAdmin, isRegionalManager])
 
   useEffect(() => {
     loadDormantStock()
-  }, [])
+  }, [activeBranch])
 
   useEffect(() => {
     filterStock()
-  }, [dormantStock, selectedClassification, searchTerm, valueRange, daysRange, qtyRange, filterNoSales])
+  }, [dormantStock, selectedClassification, searchTerm, valueRange, daysRange, qtyRange, filterNoSales, sortField, sortDirection])
 
 
-  const loadDormantStock = async () => {
+  const loadDormantStock = useCallback(async () => {
     try {
       setLoading(true)
       
@@ -88,6 +146,7 @@ const DormantStock: React.FC = () => {
         if (error.message.includes('relation "dormant_stock" does not exist')) {
           console.log('Dormant stock table does not exist yet')
           setDormantStock([])
+          setTotalItems(0)
           toast({
             title: "Table Not Found",
             description: "The dormant_stock table doesn't exist yet. Please run the database migration first.",
@@ -98,13 +157,26 @@ const DormantStock: React.FC = () => {
         throw error
       }
 
-      // If table exists, load the full data
-      const { data: fullData, error: fullError } = await supabase
+      // Build query with branch filtering
+      let query = supabase
         .from('dormant_stock')
         .select(`
           *,
           branches!dormant_stock_branch_id_fkey(name, code)
-        `)
+        `, { count: 'exact' })
+
+      // Filter by active branch for proper compartmentalization
+      if (activeBranch) {
+        query = query.eq('branch_id', activeBranch.id)
+      }
+
+      // Get total count first
+      const { count, error: countError } = await query
+      if (countError) throw countError
+      setTotalItems(count || 0)
+
+      // Now get all data for the branch (we'll paginate client-side after filtering)
+      const { data: fullData, error: fullError } = await query
         .order('created_at', { ascending: false })
       
       if (fullError) throw fullError
@@ -134,12 +206,13 @@ const DormantStock: React.FC = () => {
         variant: "destructive",
       })
       setDormantStock([])
+      setTotalItems(0)
     } finally {
       setLoading(false)
     }
-  }
+  }, [activeBranch, toast])
 
-  const filterStock = () => {
+  const filterStock = useCallback(() => {
     let filtered = dormantStock
 
     if (selectedClassification && selectedClassification !== 'all') {
@@ -189,7 +262,7 @@ const DormantStock: React.FC = () => {
     })
 
     setFilteredStock(filtered)
-  }
+  }, [dormantStock, selectedClassification, searchTerm, valueRange, daysRange, qtyRange, filterNoSales, sortField, sortDirection])
 
   const getAnalyticsData = () => {
     // Use dormantStock (all data) for panel counts, filteredStock for other analytics
@@ -326,7 +399,10 @@ const DormantStock: React.FC = () => {
           </Button>
         </header>
         <main className="flex-1 overflow-y-auto p-6">
-          <DormantStockFileUpload onUploadComplete={loadDormantStock} />
+          <DormantStockFileUpload 
+            onUploadComplete={loadDormantStock}
+            branchId={activeBranch?.id || null}
+          />
         </main>
       </div>
     )
@@ -342,7 +418,14 @@ const DormantStock: React.FC = () => {
             <Archive className="h-6 w-6 text-blue-600" />
             Dormant Stock Management
           </h1>
-          <p className="text-muted-foreground">Monitor and manage dormant stock inventory</p>
+          <p className="text-muted-foreground">
+            Monitor and manage dormant stock inventory
+            {activeBranch && (
+              <span className="ml-2 text-primary font-semibold">
+                • {activeBranch.name}
+              </span>
+            )}
+          </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={exportToCSV} disabled={filteredStock.length === 0}>
@@ -806,7 +889,8 @@ const DormantStock: React.FC = () => {
                 <div>
                   <CardTitle>Dormant Stock Items</CardTitle>
                   <CardDescription>
-                    {filteredStock.length} items found • Total value: UGX {analytics.totalValue.toLocaleString()}
+                    Showing {Math.min((currentPage - 1) * itemsPerPage + 1, filteredStock.length)}-{Math.min(currentPage * itemsPerPage, filteredStock.length)} of {filteredStock.length} items • Total value: UGX {analytics.totalValue.toLocaleString()}
+                    {activeBranch && ` • Branch: ${activeBranch.name}`}
                   </CardDescription>
                 </div>
                 <div className="flex gap-2">
@@ -902,7 +986,9 @@ const DormantStock: React.FC = () => {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredStock.map((item) => (
+                        {filteredStock
+                          .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+                          .map((item) => (
                           <TableRow key={item.id} className="hover:bg-muted/50">
                             <TableCell className="font-mono">{item.product_id}</TableCell>
                             <TableCell>
@@ -925,6 +1011,55 @@ const DormantStock: React.FC = () => {
                         ))}
                       </TableBody>
                     </Table>
+                  </div>
+                )}
+                
+                {/* Pagination Controls */}
+                {filteredStock.length > itemsPerPage && (
+                  <div className="flex items-center justify-between mt-4 pt-4 border-t">
+                    <div className="flex items-center gap-2">
+                      <Label className="text-sm">Items per page:</Label>
+                      <Select 
+                        value={itemsPerPage.toString()} 
+                        onValueChange={(value) => {
+                          setItemsPerPage(Number(value))
+                          setCurrentPage(1)
+                        }}
+                      >
+                        <SelectTrigger className="w-[100px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="25">25</SelectItem>
+                          <SelectItem value="50">50</SelectItem>
+                          <SelectItem value="100">100</SelectItem>
+                          <SelectItem value="200">200</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1}
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                        Previous
+                      </Button>
+                      <span className="text-sm text-muted-foreground">
+                        Page {currentPage} of {Math.ceil(filteredStock.length / itemsPerPage)}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.min(Math.ceil(filteredStock.length / itemsPerPage), prev + 1))}
+                        disabled={currentPage >= Math.ceil(filteredStock.length / itemsPerPage)}
+                      >
+                        Next
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 )}
               </CardContent>

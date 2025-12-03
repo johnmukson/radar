@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useBranch } from '@/contexts/BranchContext'
 import { useAuth } from '@/contexts/AuthContext'
@@ -18,6 +18,21 @@ const BranchSelection = () => {
     hasMultipleBranches,
     error 
   } = useBranch()
+  const [showBranchChangedMessage, setShowBranchChangedMessage] = useState(false)
+
+  // Check if previously selected branch is no longer accessible
+  useEffect(() => {
+    const savedBranchId = localStorage.getItem('selected_branch_id')
+    if (savedBranchId && !loading && availableBranches.length > 0) {
+      const savedBranchExists = availableBranches.some(b => b.id === savedBranchId)
+      if (!savedBranchExists && !selectedBranch) {
+        // Previously selected branch is no longer accessible
+        setShowBranchChangedMessage(true)
+        // Clear the invalid saved branch
+        localStorage.removeItem('selected_branch_id')
+      }
+    }
+  }, [availableBranches, loading, selectedBranch])
 
   // If user is not authenticated, redirect to auth
   useEffect(() => {
@@ -112,9 +127,19 @@ const BranchSelection = () => {
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-white mb-2">Select Your Branch</h1>
           <p className="text-slate-400">
-            Choose the branch you want to work with. You can switch branches by logging out and logging back in.
+            Choose the branch you want to work with. You can switch branches later from the sidebar.
           </p>
         </div>
+
+        {showBranchChangedMessage && (
+          <Alert className="mb-6 bg-yellow-500/10 border-yellow-500/50">
+            <AlertCircle className="h-4 w-4 text-yellow-500" />
+            <AlertDescription className="text-yellow-200">
+              <strong>Branch Access Changed:</strong> Your previously selected branch is no longer available. 
+              Please select a branch from the list below to continue. You are still logged in.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {availableBranches.map((branch) => (

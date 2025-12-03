@@ -28,7 +28,8 @@ import {
   BarChart2,
   LogOut,
   Archive,
-  Building2
+  Building2,
+  Sparkles
 } from 'lucide-react'
 import { useUserRole } from '@/hooks/useUserRole'
 import { useBranch } from '@/contexts/BranchContext'
@@ -98,6 +99,12 @@ const menuItems = [
     url: "/analysis",
     icon: BarChart2,
     roles: ['admin', 'system_admin', 'regional_manager', 'branch_system_admin'],
+  },
+  {
+    title: "AI Insights",
+    url: "/ai-insights",
+    icon: Sparkles,
+    roles: ['system_admin', 'regional_manager'],
   },
   {
     title: "Dormant Stock",

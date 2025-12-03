@@ -51,7 +51,7 @@ export const BranchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return
     }
 
-    // If single branch, auto-select it
+    // If single branch, auto-select it (even if different from saved)
     if (branches.length === 1) {
       const branch = branches[0]
       setSelectedBranchState(branch)
@@ -65,7 +65,17 @@ export const BranchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (savedBranchId) {
       const savedBranch = branches.find(b => b.id === savedBranchId)
       if (savedBranch) {
+        // Valid saved branch found - use it
         setSelectedBranchState(savedBranch)
+        setLoading(false)
+        return
+      } else {
+        // Saved branch is no longer accessible, but user has other branches
+        // Clear the invalid saved branch and let user select from available branches
+        console.warn(`Saved branch ${savedBranchId} is no longer accessible. Available branches:`, branches.map(b => b.id))
+        localStorage.removeItem(BRANCH_STORAGE_KEY)
+        // Don't auto-select - let user choose from available branches
+        setSelectedBranchState(null)
         setLoading(false)
         return
       }
@@ -81,6 +91,16 @@ export const BranchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const isValidBranch = branches.some(b => b.id === branch.id)
     if (!isValidBranch) {
       console.error('Attempted to select invalid branch:', branch.id)
+      console.error('Available branches:', branches.map(b => ({ id: b.id, name: b.name })))
+      // Clear invalid selection from localStorage
+      localStorage.removeItem(BRANCH_STORAGE_KEY)
+      return
+    }
+
+    // Verify branch is active
+    const branchData = branches.find(b => b.id === branch.id)
+    if (branchData && branchData.status !== 'active') {
+      console.warn('Attempted to select inactive branch:', branch.id)
       return
     }
 
