@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useCallback } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -55,42 +55,57 @@ const UploadPreviewDialog: React.FC<UploadPreviewDialogProps> = ({
     }).filter((report): report is ValidationReport => report !== null)
   }, [items, removedIndices])
 
+  // ✅ Helper function to generate duplicate key (consistent across all checks)
+  const getDuplicateKey = useCallback((item: StockItemForValidation): string => {
+    const batchNum = item.batch_number ? String(item.batch_number).trim() : 'null'
+    return `${item.product_name.toLowerCase().trim()}_${item.expiry_date || 'null'}_${item.branch_id || 'null'}_${batchNum}`
+  }, [])
+
   // Check for duplicates in batch
   const batchDuplicates = useMemo(() => {
     const validItems = items.filter((_, index) => !removedIndices.has(index))
     return checkDuplicatesInBatch(validItems)
   }, [items, removedIndices])
 
-  // ✅ Check for database duplicates
+  // ✅ Check for database duplicates (including batch_number)
   const isDbDuplicate = useMemo(() => {
     const duplicateSet = new Set<string>()
-    dbDuplicates.forEach((duplicateItems, key) => {
-      duplicateItems.forEach(item => {
-        const itemKey = `${item.product_name.toLowerCase().trim()}_${item.expiry_date}_${item.branch_id}`
-        duplicateSet.add(itemKey)
+    if (dbDuplicates && dbDuplicates instanceof Map) {
+      dbDuplicates.forEach((duplicateItems, key) => {
+        if (Array.isArray(duplicateItems)) {
+          duplicateItems.forEach(item => {
+            if (item && item.product_name) {
+              // ✅ Include batch_number in duplicate key
+              const itemKey = getDuplicateKey(item)
+              duplicateSet.add(itemKey)
+            }
+          })
+        }
       })
-    })
+    }
     return duplicateSet
-  }, [dbDuplicates])
+  }, [dbDuplicates, getDuplicateKey])
 
-  // Statistics
+  // Statistics - Note: All items will be uploaded, stats are just for information
   const stats = useMemo(() => {
+    // Count items that would be "perfect" (valid, no duplicates) - but all will be uploaded
     const valid = validationReports.filter(r => {
-      const key = `${r.item.product_name.toLowerCase().trim()}_${r.item.expiry_date}_${r.item.branch_id}`
+      const key = getDuplicateKey(r.item)
       return r.overall.isValid && !batchDuplicates.has(key) && !isDbDuplicate.has(key)
     }).length
+    // Count items with warnings/errors - but they'll still be uploaded
     const invalid = validationReports.filter(r => !r.overall.isValid).length
-    const batchDupCount = Array.from(batchDuplicates.values()).flat().filter((indices, _, self) => {
-      // Count unique items (not removed)
-      return indices.some(idx => !removedIndices.has(idx))
+    const batchDupCount = Array.from(batchDuplicates.values()).filter((indices) => {
+      // indices is an array of numbers, check if any index is not removed
+      return Array.isArray(indices) && indices.some(idx => !removedIndices.has(idx))
     }).length
-    const dbDupCount = Array.from(dbDuplicates.values()).flat().length
+    const dbDupCount = Array.from(dbDuplicates?.values() || []).flat().length
     const total = validationReports.length
     
     // ✅ Calculate total value of valid items
     const totalValue = validationReports
       .filter(r => {
-        const key = `${r.item.product_name.toLowerCase().trim()}_${r.item.expiry_date}_${r.item.branch_id}`
+        const key = getDuplicateKey(r.item)
         return r.overall.isValid && !batchDuplicates.has(key) && !isDbDuplicate.has(key)
       })
       .reduce((sum, r) => sum + (r.item.quantity * r.item.unit_price), 0)
@@ -103,7 +118,7 @@ const UploadPreviewDialog: React.FC<UploadPreviewDialogProps> = ({
       removed: removedIndices.size,
       totalValue // ✅ Total monetary value
     }
-  }, [validationReports, batchDuplicates, dbDuplicates, isDbDuplicate, removedIndices])
+  }, [validationReports, batchDuplicates, dbDuplicates, isDbDuplicate, removedIndices, getDuplicateKey])
   
   // ✅ Get validation error summary
   const validationErrorSummary = useMemo(() => {
@@ -124,7 +139,7 @@ const UploadPreviewDialog: React.FC<UploadPreviewDialogProps> = ({
     const dbDupItems: string[] = []
     
     validationReports.forEach(report => {
-      const key = `${report.item.product_name.toLowerCase().trim()}_${report.item.expiry_date}_${report.item.branch_id}`
+      const key = getDuplicateKey(report.item)
       if (batchDuplicates.has(key)) {
         batchDupItems.push(report.item.product_name)
       }
@@ -137,7 +152,7 @@ const UploadPreviewDialog: React.FC<UploadPreviewDialogProps> = ({
       batchDuplicates: Array.from(new Set(batchDupItems)),
       databaseDuplicates: Array.from(new Set(dbDupItems))
     }
-  }, [validationReports, batchDuplicates, isDbDuplicate])
+  }, [validationReports, batchDuplicates, isDbDuplicate, getDuplicateKey])
   
   // ✅ Calculate estimated upload time (average 0.1 seconds per item)
   const estimatedUploadTime = useMemo(() => {
@@ -157,7 +172,7 @@ const UploadPreviewDialog: React.FC<UploadPreviewDialogProps> = ({
   // Filtered reports
   const filteredReports = useMemo(() => {
     return validationReports.filter((report) => {
-      const key = `${report.item.product_name.toLowerCase().trim()}_${report.item.expiry_date}_${report.item.branch_id}`
+      const key = getDuplicateKey(report.item)
       const isBatchDuplicate = batchDuplicates.has(key)
       const isDbDup = isDbDuplicate.has(key)
       const isDuplicate = isBatchDuplicate || isDbDup
@@ -178,28 +193,43 @@ const UploadPreviewDialog: React.FC<UploadPreviewDialogProps> = ({
         case 'duplicates':
           return isDuplicate
         default:
-          return true
+          return true // Show all items by default
       }
     })
-  }, [validationReports, filter, batchDuplicates, isDbDuplicate, removedIndices, items])
+  }, [validationReports, filter, batchDuplicates, isDbDuplicate, removedIndices, items, getDuplicateKey])
 
   const handleRemove = (index: number) => {
     setRemovedIndices(prev => new Set([...prev, index]))
   }
 
   const handleConfirm = () => {
-    const validItems = items.filter((item, index) => {
+    // ✅ Process ALL items - including duplicates and invalid ones
+    // Only exclude items that were manually removed by user
+    const itemsToUpload = items.filter((item, index) => {
+      // Only exclude manually removed items - process everything else
+      return !removedIndices.has(index)
+    })
+    
+    // Log what we're uploading for debugging
+    const duplicateCount = itemsToUpload.filter((item, index) => {
+      if (removedIndices.has(index)) return false
+      const key = getDuplicateKey(item)
+      return batchDuplicates.has(key) || isDbDuplicate.has(key)
+    }).length
+    
+    const invalidCount = itemsToUpload.filter((item, index) => {
       if (removedIndices.has(index)) return false
       const report = validationReports.find(r => 
         r.item.product_name === item.product_name &&
         r.item.expiry_date === item.expiry_date &&
         r.item.branch_id === item.branch_id
       )
-      if (!report) return false
-      const key = `${item.product_name.toLowerCase().trim()}_${item.expiry_date}_${item.branch_id}`
-      return report.overall.isValid && !batchDuplicates.has(key) && !isDbDuplicate.has(key)
-    })
-    onConfirm(validItems)
+      return report && !report.overall.isValid
+    }).length
+    
+    console.log(`📤 Uploading ${itemsToUpload.length} items (${duplicateCount} duplicates, ${invalidCount} invalid) - processing ALL items`)
+    
+    onConfirm(itemsToUpload)
     onOpenChange(false)
   }
 
@@ -317,7 +347,7 @@ const UploadPreviewDialog: React.FC<UploadPreviewDialogProps> = ({
             <XCircle className="h-4 w-4" />
             <AlertDescription>
               <div className="font-semibold mb-2">
-                {stats.invalid} item(s) have validation errors and will be skipped:
+                {stats.invalid} item(s) have validation warnings (will still be uploaded):
               </div>
               <div className="space-y-1 text-sm">
                 {validationErrorSummary.slice(0, 5).map(({ error, count }, index) => (
@@ -344,7 +374,7 @@ const UploadPreviewDialog: React.FC<UploadPreviewDialogProps> = ({
             <AlertTriangle className="h-4 w-4 text-yellow-600" />
             <AlertDescription className="text-yellow-900 dark:text-yellow-100">
               <div className="font-semibold mb-2">
-                {stats.duplicates} duplicate item(s) detected and will be skipped:
+                {stats.duplicates} duplicate item(s) detected (will still be uploaded):
               </div>
               <div className="space-y-2 text-sm">
                 {duplicateSummary.batchDuplicates.length > 0 && (
@@ -418,7 +448,7 @@ const UploadPreviewDialog: React.FC<UploadPreviewDialogProps> = ({
                     </TableRow>
                   ) : (
                     filteredReports.map((report, reportIndex) => {
-                      const key = `${report.item.product_name.toLowerCase().trim()}_${report.item.expiry_date}_${report.item.branch_id}`
+                      const key = getDuplicateKey(report.item)
                       const isBatchDuplicate = batchDuplicates.has(key)
                       const isDbDup = isDbDuplicate.has(key) // ✅ Check database duplicates
                       const isDuplicate = isBatchDuplicate || isDbDup

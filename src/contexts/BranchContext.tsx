@@ -36,15 +36,46 @@ export const BranchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const isSystemAdmin = branches.some(b => b.role === 'system_admin')
   const isRegionalManager = branches.some(b => b.role === 'regional_manager')
 
-  // Load selected branch from localStorage on mount
+  // Load selected branch from localStorage on mount and preserve selection
   useEffect(() => {
-    if (!user || branchesLoading) {
+    if (!user) {
+      setLoading(false)
+      return
+    }
+
+    // If still loading branches, preserve current selection (don't clear it)
+    if (branchesLoading) {
+      // Try to restore from localStorage if we don't have a selection yet
+      if (!selectedBranch) {
+        const savedBranchId = localStorage.getItem(BRANCH_STORAGE_KEY)
+        if (savedBranchId) {
+          // Keep the saved branch ID in localStorage, we'll validate it once branches load
+          // Don't clear it during loading
+        }
+      }
       setLoading(branchesLoading)
       return
     }
 
-    // If no branches available, clear selection
-    if (branches.length === 0) {
+    // If there's an error loading branches, preserve the current selection
+    if (branchesError && branches.length === 0) {
+      // If we have a saved branch ID, try to keep it (don't clear on temporary errors)
+      const savedBranchId = localStorage.getItem(BRANCH_STORAGE_KEY)
+      if (savedBranchId && selectedBranch?.id === savedBranchId) {
+        // Keep the current selection even if branches failed to load
+        setLoading(false)
+        return
+      }
+      // Only clear if we truly have no branches and no saved selection
+      if (!savedBranchId) {
+        setSelectedBranchState(null)
+      }
+      setLoading(false)
+      return
+    }
+
+    // If no branches available (and no error), clear selection
+    if (branches.length === 0 && !branchesError) {
       setSelectedBranchState(null)
       localStorage.removeItem(BRANCH_STORAGE_KEY)
       setLoading(false)
@@ -65,26 +96,37 @@ export const BranchProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (savedBranchId) {
       const savedBranch = branches.find(b => b.id === savedBranchId)
       if (savedBranch) {
-        // Valid saved branch found - use it
+        // Valid saved branch found - use it (preserve selection)
         setSelectedBranchState(savedBranch)
+        localStorage.setItem(BRANCH_STORAGE_KEY, savedBranch.id) // Ensure it's saved
         setLoading(false)
         return
       } else {
         // Saved branch is no longer accessible, but user has other branches
-        // Clear the invalid saved branch and let user select from available branches
-        console.warn(`Saved branch ${savedBranchId} is no longer accessible. Available branches:`, branches.map(b => b.id))
-        localStorage.removeItem(BRANCH_STORAGE_KEY)
-        // Don't auto-select - let user choose from available branches
-        setSelectedBranchState(null)
-        setLoading(false)
-        return
+        // Only clear if the branch is truly not in the list (not just a loading error)
+        if (branches.length > 0) {
+          console.warn(`Saved branch ${savedBranchId} is no longer accessible. Available branches:`, branches.map(b => b.id))
+          localStorage.removeItem(BRANCH_STORAGE_KEY)
+          // Don't auto-select - let user choose from available branches
+          setSelectedBranchState(null)
+          setLoading(false)
+          return
+        }
+        // If branches.length === 0 but we got here, it might be an error - preserve selection
       }
     }
 
-    // No saved branch found, don't auto-select (user must choose)
+    // No saved branch found, but if we already have a selection, keep it
+    if (selectedBranch && branches.some(b => b.id === selectedBranch.id)) {
+      // Current selection is still valid, keep it
+      setLoading(false)
+      return
+    }
+
+    // No saved branch and no current valid selection - don't auto-select
     setSelectedBranchState(null)
     setLoading(false)
-  }, [user, branches, branchesLoading])
+  }, [user, branches, branchesLoading, branchesError, selectedBranch])
 
   const setSelectedBranch = useCallback((branch: Branch) => {
     // Verify branch is in available branches

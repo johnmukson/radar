@@ -90,7 +90,9 @@ const StockList = () => {
         throw error
       }
 
-      setStockItems(data || [])
+      // Filter out items with quantity 0 (completed/out of stock items)
+      const activeItems = (data || []).filter(item => (item.quantity || 0) > 0)
+      setStockItems(activeItems)
     } catch (error: unknown) {
       // Better error message extraction
       let errorMessage = "Failed to fetch stock items"
@@ -279,7 +281,7 @@ const StockList = () => {
     try {
       const newQty = adjustItem.quantity - adjustQty
       const updateObj: { quantity: number; status?: string } = { quantity: newQty }
-      if (newQty === 0) updateObj.status = 'completed'
+      if (newQty === 0) updateObj.status = 'out_of_stock'
       const { error: updateError } = await supabase
         .from('stock_items')
         .update(updateObj)

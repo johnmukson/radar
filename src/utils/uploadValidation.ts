@@ -15,6 +15,7 @@ export interface StockItemForValidation {
   unit_price: number
   expiry_date: string
   branch_id: string
+  batch_number?: string | null
 }
 
 export interface ValidationReport {
@@ -57,6 +58,7 @@ export function validateProductName(name: string): ValidationResult {
 
 /**
  * Validate quantity
+ * Supports any number from 1 to very large numbers (with or without commas)
  */
 export function validateQuantity(qty: unknown): ValidationResult {
   const errors: string[] = []
@@ -67,10 +69,12 @@ export function validateQuantity(qty: unknown): ValidationResult {
     return { isValid: false, errors, warnings }
   }
 
-  const num = typeof qty === 'number' ? qty : parseFloat(String(qty))
+  // Handle comma-separated numbers (e.g., "1,000" or "1,000,000")
+  const qtyStr = String(qty).replace(/[,\s]/g, '').trim()
+  const num = typeof qty === 'number' ? qty : parseFloat(qtyStr)
 
-  if (isNaN(num)) {
-    errors.push('Quantity must be a number')
+  if (isNaN(num) || !isFinite(num)) {
+    errors.push('Quantity must be a valid number')
     return { isValid: false, errors, warnings }
   }
 
@@ -78,12 +82,12 @@ export function validateQuantity(qty: unknown): ValidationResult {
     errors.push('Quantity must be a whole number')
   }
 
-  if (num <= 0) {
-    errors.push('Quantity must be greater than 0')
+  if (num < 1) {
+    errors.push('Quantity must be at least 1')
+  } else if (num > Number.MAX_SAFE_INTEGER) {
+    warnings.push(`Quantity is very large (over ${Number.MAX_SAFE_INTEGER.toLocaleString()})`)
   } else if (num > 1000000) {
     warnings.push('Quantity is very large (over 1,000,000)')
-  } else if (num < 1) {
-    errors.push('Quantity must be at least 1')
   }
 
   return {
@@ -95,6 +99,7 @@ export function validateQuantity(qty: unknown): ValidationResult {
 
 /**
  * Validate unit price
+ * Supports any positive number (with or without commas, with or without decimals)
  */
 export function validateUnitPrice(price: unknown): ValidationResult {
   const errors: string[] = []
@@ -105,15 +110,19 @@ export function validateUnitPrice(price: unknown): ValidationResult {
     return { isValid: false, errors, warnings }
   }
 
-  const num = typeof price === 'number' ? price : parseFloat(String(price))
+  // Handle comma-separated numbers (e.g., "6,000" or "1,000,000.50")
+  const priceStr = String(price).replace(/[,\s]/g, '').trim()
+  const num = typeof price === 'number' ? price : parseFloat(priceStr)
 
-  if (isNaN(num)) {
-    errors.push('Unit price must be a number')
+  if (isNaN(num) || !isFinite(num)) {
+    errors.push('Unit price must be a valid number')
     return { isValid: false, errors, warnings }
   }
 
   if (num <= 0) {
     errors.push('Unit price must be greater than 0')
+  } else if (num > Number.MAX_SAFE_INTEGER) {
+    warnings.push(`Unit price is very high (over ${Number.MAX_SAFE_INTEGER.toLocaleString()})`)
   } else if (num > 10000000) {
     warnings.push('Unit price is very high (over 10,000,000)')
   } else if (num < 0.01) {
@@ -134,9 +143,10 @@ export function validateExpiryDate(date: unknown, allowPastDates = false): Valid
   const errors: string[] = []
   const warnings: string[] = []
 
+  // Allow null/empty expiry dates - they'll be stored as null in database
   if (!date || date === '' || date === null) {
-    errors.push('Expiry date is required')
-    return { isValid: false, errors, warnings }
+    warnings.push('Expiry date is missing - will be stored as null')
+    return { isValid: true, errors, warnings } // Don't block upload, just warn
   }
 
   let dateObj: Date | null = null
@@ -226,7 +236,11 @@ export function checkDuplicatesInBatch(items: StockItemForValidation[]): Map<str
   const itemKeyMap = new Map<string, number>()
 
   items.forEach((item, index) => {
-    const key = `${item.product_name.toLowerCase().trim()}_${item.expiry_date}_${item.branch_id}`
+    // ✅ Include batch_number in duplicate key
+    // Format: product_name_expiry_date_branch_id_batch_number
+    // If batch_number is null/undefined, use 'null' as part of the key
+    const batchNum = item.batch_number ? String(item.batch_number).trim() : 'null'
+    const key = `${item.product_name.toLowerCase().trim()}_${item.expiry_date || 'null'}_${item.branch_id}_${batchNum}`
     
     if (itemKeyMap.has(key)) {
       const firstIndex = itemKeyMap.get(key)!
@@ -244,54 +258,76 @@ export function checkDuplicatesInBatch(items: StockItemForValidation[]): Map<str
 
 /**
  * Check for duplicates against existing database items
+ * Optimized to use exact match queries with concurrency control
  */
 export async function checkDuplicatesInDatabase(
   items: StockItemForValidation[],
   supabaseClient: any
 ): Promise<Map<string, StockItemForValidation[]>> {
   const duplicateMap = new Map<string, StockItemForValidation[]>()
+  
+  // Limit the number of items to check to avoid blocking (check max 100 items)
+  const itemsToCheck = items.slice(0, 100)
+  
+  if (items.length > 100) {
+    console.warn(`Checking duplicates for first 100 items only (out of ${items.length} total)`)
+  }
 
-  // Group items by branch for efficient querying
-  const itemsByBranch = new Map<string, StockItemForValidation[]>()
-  items.forEach(item => {
-    if (!itemsByBranch.has(item.branch_id)) {
-      itemsByBranch.set(item.branch_id, [])
-    }
-    itemsByBranch.get(item.branch_id)!.push(item)
-  })
+  // Use parallel checks with concurrency limit for better performance
+  const CONCURRENCY_LIMIT = 20 // Check 20 items at a time
+  const checkPromises: Array<Promise<void>> = []
 
-  // Check each branch's items
-  for (const [branchId, branchItems] of itemsByBranch) {
-    const productNames = branchItems.map(item => item.product_name.trim())
-    const expiryDates = branchItems.map(item => item.expiry_date)
-
-    const { data: existingItems, error } = await supabaseClient
-      .from('stock_items')
-      .select('product_name, expiry_date, branch_id')
-      .eq('branch_id', branchId)
-      .in('product_name', productNames)
-
-    if (error) {
-      console.error('Error checking duplicates:', error)
-      continue
-    }
-
-    // Check each upload item against existing items
-    branchItems.forEach(item => {
-      const existing = existingItems?.find((existing: any) => 
-        existing.product_name.toLowerCase().trim() === item.product_name.toLowerCase().trim() &&
-        existing.expiry_date === item.expiry_date &&
-        existing.branch_id === item.branch_id
-      )
-
-      if (existing) {
-        const key = `${item.product_name}_${item.expiry_date}_${item.branch_id}`
-        if (!duplicateMap.has(key)) {
-          duplicateMap.set(key, [])
+  for (let i = 0; i < itemsToCheck.length; i += CONCURRENCY_LIMIT) {
+    const chunk = itemsToCheck.slice(i, i + CONCURRENCY_LIMIT)
+    
+    const chunkPromises = chunk.map(async (item) => {
+      try {
+        // ✅ Use exact match query including batch_number (much faster with proper index)
+        let query = supabaseClient
+          .from('stock_items')
+          .select('product_name, expiry_date, branch_id, batch_number')
+          .eq('product_name', item.product_name.trim())
+          .eq('branch_id', item.branch_id)
+        
+        // Handle null expiry_date correctly
+        if (item.expiry_date === null || item.expiry_date === undefined || item.expiry_date === '') {
+          query = query.is('expiry_date', null)
+        } else {
+          query = query.eq('expiry_date', item.expiry_date)
         }
-        duplicateMap.get(key)!.push(item)
+        
+        // ✅ Handle batch_number in duplicate check
+        if (item.batch_number === null || item.batch_number === undefined || item.batch_number === '') {
+          query = query.is('batch_number', null)
+        } else {
+          query = query.eq('batch_number', String(item.batch_number).trim())
+        }
+        
+        const { data: existing, error } = await query.maybeSingle()
+
+        if (error) {
+          console.error('Error checking duplicate:', error)
+          return
+        }
+
+        if (existing) {
+          // ✅ Include batch_number in duplicate key
+          const batchNum = item.batch_number ? String(item.batch_number).trim() : 'null'
+          const key = `${item.product_name}_${item.expiry_date || 'null'}_${item.branch_id}_${batchNum}`
+          if (!duplicateMap.has(key)) {
+            duplicateMap.set(key, [])
+          }
+          duplicateMap.get(key)!.push(item)
+        }
+      } catch (error) {
+        console.error('Error checking duplicate for item:', error)
       }
     })
+
+    checkPromises.push(...chunkPromises)
+    
+    // Wait for this chunk to complete before starting next chunk
+    await Promise.all(chunkPromises)
   }
 
   return duplicateMap

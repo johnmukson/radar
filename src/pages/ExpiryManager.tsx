@@ -237,8 +237,12 @@ Branch: ${selectedBranch.name}`
         .order('expiry_date', { ascending: true })
         .range(from, to)
       if (error) throw error
+      
+      // Filter out items with quantity 0 (completed/out of stock items)
+      const activeData = (data || []).filter(item => (item.quantity || 0) > 0)
+      
       const today = new Date()
-      const items = data.map(item => {
+      const items = activeData.map(item => {
         const daysUntilExpiry = Math.ceil((new Date(item.expiry_date).getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
         let risk_level = 'very-low'
         

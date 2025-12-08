@@ -99,12 +99,15 @@ serve(async (req) => {
 
     const userAlerts: UserAlert[] = []
     const alertsSent: Array<{ user_id: string; method: string; success: boolean }> = []
+    const errors: Array<{ user_id: string; error: string }> = []
 
     // Process each user and generate role-based alerts
     for (const user of users) {
-      if (!user.user_roles || user.user_roles.length === 0) {
-        continue // Skip users without roles
-      }
+      try {
+        if (!user.user_roles || user.user_roles.length === 0) {
+          console.log(`Skipping user ${user.email}: no roles assigned`)
+          continue // Skip users without roles
+        }
 
       const roles = user.user_roles.map((ur: any) => ur.role)
       const branchIds = user.user_roles
@@ -234,17 +237,25 @@ serve(async (req) => {
         }
       }
 
-      if (alerts.length > 0) {
-        userAlerts.push({
-          user_id: user.id,
-          user_email: user.email,
-          user_name: user.name || user.email,
-          user_phone: user.phone,
-          roles,
-          branch_ids: branchIds,
-          alerts,
-          priority
-        })
+        if (alerts.length > 0) {
+          userAlerts.push({
+            user_id: user.id,
+            user_email: user.email,
+            user_name: user.name || user.email,
+            user_phone: user.phone,
+            roles,
+            branch_ids: branchIds,
+            alerts,
+            priority
+          })
+          console.log(`Generated ${alerts.length} alerts for user ${user.email}`)
+        } else {
+          console.log(`No alerts generated for user ${user.email}`)
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        console.error(`Error processing alerts for user ${user.id} (${user.email}):`, errorMessage)
+        errors.push({ user_id: user.id, error: errorMessage })
       }
     }
 
@@ -259,30 +270,39 @@ serve(async (req) => {
         `\n\nView details: ${supabaseUrl.replace('/rest/v1', '')}/dashboard`
 
       // Send via WhatsApp if phone number is available
+      // Use queue_whatsapp_notification function to respect user preferences
       if (userAlert.user_phone) {
         try {
-          // Queue WhatsApp notification
-          const { error: whatsappError } = await supabaseAdmin
-            .from('whatsapp_notifications')
-            .insert({
-              user_id: userAlert.user_id,
-              branch_id: userAlert.branch_ids[0] || null,
-              recipient_phone: userAlert.user_phone,
-              message_content: alertMessage,
-              message_type: 'daily_alert',
-              related_type: 'daily_summary',
-              metadata: {
-                priority: userAlert.priority,
-                alert_count: userAlert.alerts.length,
-                roles: userAlert.roles
-              }
-            })
+          // Use the queue function for each branch (respects preferences and quiet hours)
+          let whatsappQueued = false
+          for (const branchId of userAlert.branch_ids) {
+            const { data: notificationId, error: whatsappError } = await supabaseAdmin
+              .rpc('queue_whatsapp_notification', {
+                p_user_id: userAlert.user_id,
+                p_branch_id: branchId,
+                p_recipient_phone: userAlert.user_phone,
+                p_message_content: alertMessage,
+                p_message_type: 'daily_alert',
+                p_related_type: 'daily_summary',
+                p_metadata: {
+                  priority: userAlert.priority,
+                  alert_count: userAlert.alerts.length,
+                  roles: userAlert.roles
+                }
+              })
 
-          if (whatsappError) {
-            console.error(`Error queuing WhatsApp for user ${userAlert.user_id}:`, whatsappError)
-          } else {
+            if (whatsappError) {
+              console.error(`Error queuing WhatsApp for user ${userAlert.user_id}, branch ${branchId}:`, whatsappError)
+            } else if (notificationId) {
+              whatsappQueued = true
+              console.log(`Queued WhatsApp alert for user ${userAlert.user_email}, branch ${branchId}`)
+            }
+          }
+
+          if (whatsappQueued) {
             alertsSent.push({ user_id: userAlert.user_id, method: 'whatsapp', success: true })
-            console.log(`Queued WhatsApp alert for user ${userAlert.user_email}`)
+          } else {
+            console.log(`WhatsApp alert not queued for user ${userAlert.user_email} (preferences may have disabled it)`)
           }
         } catch (error) {
           console.error(`Error sending WhatsApp to user ${userAlert.user_id}:`, error)
@@ -326,7 +346,9 @@ serve(async (req) => {
         users_processed: users.length,
         alerts_generated: userAlerts.length,
         alerts_sent: alertsSent.length,
-        details: alertsSent
+        errors_count: errors.length,
+        details: alertsSent,
+        errors: errors.length > 0 ? errors : undefined
       }),
       {
         status: 200,

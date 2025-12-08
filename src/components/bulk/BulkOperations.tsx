@@ -141,7 +141,9 @@ const BulkOperations: React.FC = () => {
 
       if (error) throw error
 
-      const itemsWithCalculations = (data || []).map(item => {
+      // Filter out items with quantity 0 (completed/out of stock items)
+      const activeItems = (data || []).filter(item => (item.quantity || 0) > 0)
+      const itemsWithCalculations = activeItems.map(item => {
         const daysToExpiry = Math.ceil((new Date(item.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
         let riskLevel = 'very-low'
         if (daysToExpiry < 0) riskLevel = 'expired'

@@ -69,11 +69,14 @@ const StockManager = () => {
 
       if (error) throw error
 
+      // Filter out items with quantity 0 (completed/out of stock items)
+      const activeData = (data || []).filter(item => (item.quantity || 0) > 0)
+
       // Transform the data to match the expected interface
-      const transformedData = data?.map(item => ({
+      const transformedData = activeData.map(item => ({
         ...item,
         branch_name: item.branches?.name || 'Unknown Branch'
-      })) || []
+      }))
 
       setStockItems(transformedData)
     } catch (error: unknown) {

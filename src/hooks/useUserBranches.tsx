@@ -24,10 +24,12 @@ export function useUserBranches() {
   useEffect(() => {
     const fetchBranches = async () => {
       setLoading(true)
-      setError(null)
+      // Don't clear error immediately - keep previous error until we have new data
+      // setError(null) - commented out to preserve error state
 
       if (!user) {
         setBranches([])
+        setError(null)
         setLoading(false)
         return
       }
@@ -39,7 +41,35 @@ export function useUserBranches() {
           .select('role')
           .eq('user_id', user.id)
 
-        if (rolesError) throw rolesError
+        if (rolesError) {
+          console.error('Error fetching user roles:', rolesError)
+          // Don't throw - try to continue with a fallback approach
+          // Set error but don't clear branches (preserve what we have)
+          setError(`Failed to fetch user roles: ${rolesError.message}`)
+          
+          // Try to fetch branches directly without role check (fallback)
+          try {
+            const { data: fallbackBranches, error: fallbackError } = await supabase
+              .from('branches')
+              .select('id, name, code, region, status')
+              .eq('status', 'active')
+              .order('name')
+              .limit(1) // Just try to see if we can access branches at all
+            
+            if (fallbackError) {
+              throw rolesError // Use original error
+            }
+          } catch (fallbackErr) {
+            throw rolesError // Use original error
+          }
+          
+          // If we get here, we can't proceed - but don't clear existing branches
+          setLoading(false)
+          return
+        }
+        
+        // Clear error on successful role fetch
+        setError(null)
 
         const userRoles = rolesData?.map(r => r.role) || []
         const isSystemAdmin = userRoles.includes('system_admin')
@@ -105,10 +135,14 @@ export function useUserBranches() {
         )
 
         setBranches(uniqueBranches)
+        setError(null) // Clear error on success
       } catch (err) {
         console.error('Error fetching user branches:', err)
-        setError(err instanceof Error ? err.message : 'Failed to fetch branches')
-        setBranches([])
+        const errorMessage = err instanceof Error ? err.message : 'Failed to fetch branches'
+        setError(errorMessage)
+        // Don't clear branches on error - preserve existing branches to maintain selection
+        // The branches state will keep its previous value, maintaining the selected branch
+        // This ensures branch selection persists even during temporary network errors
       } finally {
         setLoading(false)
       }

@@ -139,10 +139,10 @@ const UploadProgressDialog: React.FC<UploadProgressDialogProps> = ({
             </Alert>
           )}
 
-          {/* Item List (Scrollable) */}
+          {/* Item List (Scrollable) - Limit to last 50 items to prevent rendering issues */}
           <div className="max-h-[300px] overflow-y-auto border rounded-md">
             <div className="divide-y">
-              {progressItems.map((item) => (
+              {progressItems.slice(-50).map((item) => (
                 <div
                   key={item.index}
                   className={`p-3 flex items-center justify-between ${

@@ -69,7 +69,9 @@ const HighValueItems = () => {
           setItems([])
         } else {
           // Filter for high value items and calculate additional fields
+          // Also filter out items with quantity 0 (completed/out of stock items)
           const highValueItems = data
+            .filter(item => (item.quantity || 0) > 0) // Exclude items with quantity 0
             .filter(item => (item.unit_price * item.quantity) > 100000) // High value threshold
             .map(item => {
               const daysToExpiry = Math.ceil((new Date(item.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
@@ -173,7 +175,7 @@ const HighValueItems = () => {
     try {
       const newQty = adjustItem.quantity - adjustQty
       const updateObj: { quantity: number; status?: string } = { quantity: newQty }
-      if (newQty === 0) updateObj.status = 'completed'
+      if (newQty === 0) updateObj.status = 'out_of_stock'
       
       const { error: updateError } = await supabase
         .from('stock_items')

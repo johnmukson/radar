@@ -96,7 +96,8 @@ const Assignments = () => {
       
       // IMMUTABLE LAW: Exclude expired items from assignments
       // Expired items should only be managed in Expiry Manager
-      const nonExpiredItems = (items || []).filter(item => !isExpired(item.expiry_date))
+      // Also exclude items with quantity 0 (completed/out of stock items)
+      const nonExpiredItems = (items || []).filter(item => !isExpired(item.expiry_date) && (item.quantity || 0) > 0)
       
       // Calculate risk levels for all items using uniform ranges
       const today = new Date()
@@ -134,8 +135,138 @@ const Assignments = () => {
       const { data: disp, error: dispError } = await dispensersQuery
       if (dispError) throw dispError
       setDispensers((disp || []).map(d => ({ id: d.user_id, dispenser: d.name, role: 'dispenser' })))
+      
+      // Fetch existing assignments from weekly_tasks
+      // Note: weekly_tasks stores product_name, expiry_date, etc. directly (no product_id)
+      console.log('🔍 Assignments: Fetching existing weekly_tasks')
+      const { data: tasksData, error: tasksError } = await supabase
+        .from('weekly_tasks')
+        .select(`
+          *,
+          dispenser:users!assigned_to(id, name)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(1000) // Limit to prevent loading too much data
+      
+      if (tasksError) {
+        console.error('⚠️ Assignments: Error fetching weekly_tasks:', tasksError)
+      } else {
+        console.log('✅ Assignments: Fetched weekly_tasks:', tasksData?.length || 0)
+        
+        // Convert weekly_tasks to Assignment format
+        // Try to match tasks to stock items from this branch
+        // The task title format is: "Move {product_name}"
+        const existingAssignments: Assignment[] = (tasksData || [])
+          .map((task: any) => {
+            // Extract product name from title (format: "Move {product_name}")
+            const productNameFromTitle = task.title?.replace(/^Move /, '') || task.product_name || 'Unknown Product'
+            const expiryDate = task.expiry_date || task.due_date
+            
+            // Try to find matching stock item in this branch
+            const matchingItem = itemsWithRiskLevels.find((item: StockItem) => 
+              item.product_name === productNameFromTitle || 
+              item.product_name === task.product_name
+            )
+            
+            // If no exact match, create a placeholder item from task data
+            const item = matchingItem || {
+              id: `task-${task.id}`,
+              product_name: productNameFromTitle,
+              expiry_date: expiryDate,
+              risk_level: task.risk_level || 'low',
+              quantity: task.quantity || 1,
+              unit_price: 0,
+              branch: selectedBranch.name
+            }
+            
+            return {
+              dispenser_id: task.assigned_to,
+              dispenser_name: task.dispenser?.name || 'Unknown',
+              month: format(new Date(expiryDate), 'yyyy-MM'),
+              risk: (task.risk_level || item.risk_level || 'low').toLowerCase(),
+              item: {
+                id: item.id,
+                product_name: item.product_name,
+                expiry_date: item.expiry_date,
+                risk_level: item.risk_level || task.risk_level || 'low',
+                quantity: item.quantity || task.quantity || 0,
+                unit_price: item.unit_price || 0,
+                branch: selectedBranch.name
+              }
+            }
+          })
+          // Only include assignments that match items from this branch OR all if we can't determine
+          .filter((assignment: Assignment) => {
+            // Include if we found a matching item or if product_name matches
+            return itemsWithRiskLevels.some((item: StockItem) => 
+              item.product_name === assignment.item.product_name
+            )
+          })
+        
+        console.log('✅ Assignments: Converted to assignments format:', existingAssignments.length)
+        if (existingAssignments.length > 0) {
+          setAssignments(existingAssignments)
+        }
+      }
+      
+      // Also fetch emergency_assignments
+      console.log('🔍 Assignments: Fetching emergency_assignments for branch:', selectedBranch.id)
+      const stockItemIds = itemsWithRiskLevels.map(item => item.id).filter(Boolean)
+      
+      if (stockItemIds.length > 0) {
+        const { data: emergencyData, error: emergencyError } = await supabase
+          .from('emergency_assignments')
+          .select(`
+            *,
+            stock_item:stock_items(*),
+            dispenser:users!dispenser_id(id, name)
+          `)
+          .in('stock_item_id', stockItemIds)
+          .order('assigned_at', { ascending: false })
+        
+        if (emergencyError) {
+          console.error('⚠️ Assignments: Error fetching emergency_assignments:', emergencyError)
+        } else {
+          console.log('✅ Assignments: Fetched emergency_assignments:', emergencyData?.length || 0)
+          
+          // Convert emergency_assignments to Assignment format and add to existing
+          const emergencyAssignments: Assignment[] = (emergencyData || []).map((emergency: any) => {
+            const stockItem = emergency.stock_item || emergency.stock_items
+            return {
+              dispenser_id: emergency.dispenser_id,
+              dispenser_name: emergency.dispenser?.name || 'Unknown',
+              month: format(new Date(emergency.deadline), 'yyyy-MM'),
+              risk: (stockItem?.risk_level || 'critical').toLowerCase(),
+              item: {
+                id: stockItem?.id || emergency.stock_item_id,
+                product_name: stockItem?.product_name || 'Unknown Product',
+                expiry_date: stockItem?.expiry_date || emergency.deadline,
+                risk_level: stockItem?.risk_level || 'critical',
+                quantity: emergency.assigned_quantity || 0,
+                unit_price: stockItem?.unit_price || 0,
+                branch: selectedBranch.name
+              }
+            }
+          })
+          
+          // Merge with existing assignments (avoid duplicates)
+          setAssignments(prev => {
+            const combined = [...prev, ...emergencyAssignments]
+            // Remove duplicates based on item ID and dispenser ID
+            const unique = combined.filter((assignment, index, self) =>
+              index === self.findIndex(a => 
+                a.item.id === assignment.item.id && 
+                a.dispenser_id === assignment.dispenser_id &&
+                a.month === assignment.month
+              )
+            )
+            return unique
+          })
+        }
+      }
     } catch (error: unknown) {
       const errorMessage = extractErrorMessage(error, 'Failed to fetch data')
+      console.error('❌ Assignments: Error in fetchData:', error)
       toast({ title: 'Error', description: errorMessage, variant: 'destructive' })
     } finally {
       setLoading(false)

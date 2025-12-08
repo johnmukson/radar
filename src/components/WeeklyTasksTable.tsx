@@ -264,7 +264,10 @@ const WeeklyTasksTable = () => {
       
       if (error) throw error
       
-      const itemsWithCalculations = (data || []).map(item => {
+      // Filter out items with quantity 0 (completed/out of stock items)
+      const activeItems = (data || []).filter(item => (item.quantity || 0) > 0)
+      
+      const itemsWithCalculations = activeItems.map(item => {
         const daysToExpiry = Math.ceil((new Date(item.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
         let riskLevel = 'very-low'
         
@@ -305,7 +308,7 @@ const WeeklyTasksTable = () => {
       console.log('Adjusting quantity:', { current: adjustItem.quantity, adjust: adjustQty, new: newQty })
       
       const updateObj: { quantity: number; status?: string } = { quantity: newQty }
-      if (newQty === 0) updateObj.status = 'completed'
+      if (newQty === 0) updateObj.status = 'out_of_stock'
       
       const { error: updateError } = await supabase
         .from('stock_items')

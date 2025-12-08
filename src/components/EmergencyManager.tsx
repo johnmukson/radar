@@ -191,8 +191,9 @@ const EmergencyManager = () => {
       if (dispensersResponse.error) throw dispensersResponse.error
       if (assignmentsResponse.error) throw assignmentsResponse.error
 
+      // Filter out items with quantity 0 (completed/out of stock items)
       // Calculate risk levels for stock items (UNIFORM RANGES)
-      const rawStockItems = (stockResponse.data || []) as any[]
+      const rawStockItems = ((stockResponse.data || []) as any[]).filter(item => (item.quantity || 0) > 0)
       const itemsWithRisk = rawStockItems.map((item: any) => {
         const daysToExpiry = Math.ceil((new Date(item.expiry_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
         let risk_level = 'very-low'

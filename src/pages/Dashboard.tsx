@@ -17,9 +17,6 @@ import HighValueItems from '@/components/dashboard/HighValueItems'
 import BranchAnalytics from '@/components/dashboard/BranchAnalytics'
 import CrossBranchReport from '@/components/reports/CrossBranchReport'
 import ProductSearch from '@/components/ProductSearch'
-import AdvancedSearch from '@/components/search/AdvancedSearch'
-import BulkOperations from '@/components/bulk/BulkOperations'
-import ExportManager from '@/components/export/ExportManager'
 import { Badge } from '@/components/ui/badge'
 
 const Dashboard = () => {
@@ -27,11 +24,17 @@ const Dashboard = () => {
   const { hasAdminAccess, userRole, loading: roleLoading } = useUserRole();
   const { selectedBranch } = useBranch();
   const location = useLocation();
-  const [activeTab, setActiveTab] = useState<'list' | 'search' | 'advanced-search' | 'bulk' | 'export' | 'admin' | 'emergency'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'search' | 'admin' | 'emergency'>('list');
 
   useEffect(() => {
     if (location.state?.activeTab) {
-      setActiveTab(location.state.activeTab);
+      const tab = location.state.activeTab;
+      // Only set valid tabs, reset to 'list' for removed tabs
+      if (['list', 'search', 'admin', 'emergency'].includes(tab)) {
+        setActiveTab(tab);
+      } else {
+        setActiveTab('list');
+      }
     }
   }, [location.state]);
 
@@ -91,19 +94,6 @@ const Dashboard = () => {
           <button onClick={() => setActiveTab('search')} className={`px-4 py-2 text-sm font-medium ${activeTab === 'search' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}>
             Product Search
           </button>
-          <button onClick={() => setActiveTab('advanced-search')} className={`px-4 py-2 text-sm font-medium ${activeTab === 'advanced-search' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}>
-            Advanced Search
-          </button>
-          {hasAdminAccess && (
-            <button onClick={() => setActiveTab('bulk')} className={`px-4 py-2 text-sm font-medium ${activeTab === 'bulk' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}>
-              Bulk Operations
-            </button>
-          )}
-          {hasAdminAccess && (
-            <button onClick={() => setActiveTab('export')} className={`px-4 py-2 text-sm font-medium ${activeTab === 'export' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}>
-              Export Data
-            </button>
-          )}
           {hasAdminAccess && (
             <>
               <button onClick={() => setActiveTab('emergency')} className={`px-4 py-2 text-sm font-medium ${activeTab === 'emergency' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}>
@@ -121,9 +111,6 @@ const Dashboard = () => {
         <div>
           {activeTab === 'list' && <StockList />}
           {activeTab === 'search' && <ProductSearch />}
-          {activeTab === 'advanced-search' && <AdvancedSearch />}
-          {activeTab === 'bulk' && hasAdminAccess && <BulkOperations />}
-          {activeTab === 'export' && hasAdminAccess && <ExportManager />}
           {activeTab === 'admin' && hasAdminAccess && <AdminManager />}
           {activeTab === 'emergency' && hasAdminAccess && <EmergencyManager />}
         </div>

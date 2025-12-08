@@ -61,7 +61,7 @@ const StockAdjustmentDialog = ({ stockItems, onStockUpdated }: StockAdjustmentDi
     try {
       const newQuantity = Math.max(0, selectedItem.quantity + quantityAdjustment)
       const updateObj: { quantity: number; status?: string } = { quantity: newQuantity }
-      if (newQuantity === 0) updateObj.status = 'completed'
+      if (newQuantity === 0) updateObj.status = 'out_of_stock'
       
       const { error: updateError } = await supabase
         .from('stock_items')

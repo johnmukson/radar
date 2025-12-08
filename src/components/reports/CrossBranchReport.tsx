@@ -87,22 +87,31 @@ const CrossBranchReport: React.FC = () => {
       setLoading(true)
       try {
         const branchesToFetch = isSystemAdmin ? availableBranches : [selectedBranch].filter(Boolean)
+        console.log('🔍 CrossBranchReport: Fetching data for branches:', branchesToFetch.length)
         const allBranchData: BranchReportData[] = []
 
         for (const branch of branchesToFetch) {
           if (!branch) continue
 
+          console.log(`🔍 CrossBranchReport: Fetching stock for branch: ${branch.name} (${branch.id})`)
           const { data: stockItems, error: stockError } = await supabase
             .from('stock_items')
             .select('*')
             .eq('branch_id', branch.id)
 
+          console.log(`📊 CrossBranchReport: Branch ${branch.name} - Stock items:`, {
+            count: stockItems?.length || 0,
+            error: stockError
+          })
+
           if (stockError) {
-            console.error(`Error fetching stock for ${branch.name}:`, stockError)
+            console.error(`❌ CrossBranchReport: Error fetching stock for ${branch.name}:`, stockError)
             continue
           }
 
-          const stockItemIds = stockItems?.map(item => item.id) || []
+          // Filter out items with quantity 0 (completed/out of stock items)
+          const activeStockItems = (stockItems || []).filter(item => (item.quantity || 0) > 0)
+          const stockItemIds = activeStockItems.map(item => item.id) || []
           let assignments: any[] = []
           if (stockItemIds.length > 0) {
             const { data: assignmentData } = await supabase
@@ -115,19 +124,20 @@ const CrossBranchReport: React.FC = () => {
           const now = new Date()
           const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
 
-          const totalItems = stockItems?.length || 0
-          const totalQuantity = stockItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
-          const totalValue = stockItems?.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0) || 0
-          const expiringSoon = stockItems?.filter(item => {
+          // Use activeStockItems (filtered to exclude quantity 0) for all calculations
+          const totalItems = activeStockItems?.length || 0
+          const totalQuantity = activeStockItems?.reduce((sum, item) => sum + item.quantity, 0) || 0
+          const totalValue = activeStockItems?.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0) || 0
+          const expiringSoon = activeStockItems?.filter(item => {
             const expiryDate = new Date(item.expiry_date)
             return expiryDate >= now && expiryDate <= thirtyDaysFromNow
           }).length || 0
-          const expired = stockItems?.filter(item => {
+          const expired = activeStockItems?.filter(item => {
             const expiryDate = new Date(item.expiry_date)
             return expiryDate < now
           }).length || 0
-          const lowStockItems = stockItems?.filter(item => item.quantity < 10).length || 0
-          const highValueItems = stockItems?.filter(item => (item.quantity * item.unit_price) > 100000).length || 0
+          const lowStockItems = activeStockItems?.filter(item => item.quantity < 10).length || 0
+          const highValueItems = activeStockItems?.filter(item => (item.quantity * item.unit_price) > 100000).length || 0
 
           const totalAssignments = assignments.length
           const pendingAssignments = assignments.filter(a => a.status === 'pending').length
